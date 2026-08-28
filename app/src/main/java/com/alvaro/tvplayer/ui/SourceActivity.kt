@@ -73,7 +73,39 @@ class SourceActivity : ComponentActivity() {
             }.getOrDefault(1)
         }
 
+        val currentVersionName = remember {
+            runCatching {
+                packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+            }.getOrDefault("?")
+        }
+        var comprobando by remember { mutableStateOf(false) }
+
         LaunchedEffect(Unit) { update = UpdateChecker.check(currentVersionCode) }
+
+        // Comprobacion a peticion del usuario: aqui SI se informa del resultado,
+        // a diferencia de la del arranque, que es silenciosa.
+        fun comprobarActualizaciones() {
+            if (comprobando) return
+            comprobando = true
+            updateMessage = null
+            lifecycleScope.launch {
+                when (val r = UpdateChecker.comprobar(currentVersionCode)) {
+                    is UpdateResult.Disponible -> {
+                        update = r.info
+                        updateMessage = null
+                    }
+                    is UpdateResult.AlDia ->
+                        updateMessage = "Ya tienes la ultima version publicada ($currentVersionName)."
+                    is UpdateResult.SinPublicaciones ->
+                        updateMessage = "Todavia no hay ninguna version publicada en el repositorio.\n" +
+                            "Subir cambios no basta: hay que lanzar el flujo \"Publicar version\" " +
+                            "en la pestaña Actions para que se cree un Release."
+                    is UpdateResult.Error ->
+                        updateMessage = "No se pudo comprobar: ${r.mensaje}"
+                }
+                comprobando = false
+            }
+        }
 
         DisposableEffect(Unit) {
             val receiver = UpdateInstaller.registerStatusReceiver(activity) { msg ->
@@ -262,6 +294,37 @@ class SourceActivity : ComponentActivity() {
                                 recents = prefs.recentPlaylists()
                             }
                         )
+                    }
+                }
+
+                item {
+                    Spacer(Modifier.height(20.dp))
+                    SectionTitle("Version")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Instalada: $currentVersionName (codigo $currentVersionCode)",
+                                color = TextMuted,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                "Las actualizaciones llegan desde los Releases del repositorio",
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                        FocusableCard(
+                            onClick = { comprobarActualizaciones() },
+                            containerColor = Surface2,
+                            focusedContainerColor = Accent
+                        ) {
+                            Text(
+                                if (comprobando) "Comprobando..." else "Buscar actualizaciones",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp)
+                            )
+                        }
                     }
                 }
 

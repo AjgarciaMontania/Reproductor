@@ -15,17 +15,26 @@ data class UpdateInfo(
     val notes: String
 )
 
+/** Resultado detallado de una comprobacion, para poder explicar que paso. */
+sealed class UpdateResult {
+    data class Disponible(val info: UpdateInfo) : UpdateResult()
+    data object AlDia : UpdateResult()
+    data object SinPublicaciones : UpdateResult()
+    data class Error(val mensaje: String) : UpdateResult()
+}
+
 /**
  * Comprueba si hay una version nueva publicada en los Releases del repositorio.
  *
- * El workflow de GitHub Actions sube en cada release un fichero latest.json.
- * GitHub expone SIEMPRE el ultimo en esta URL estable, sin necesidad de API ni token:
+ * IMPORTANTE: no basta con hacer push. La app lee el fichero latest.json que
+ * el workflow "Publicar version" adjunta a cada Release. Mientras no exista
+ * ningun Release publicado, esta URL devuelve 404 y no hay nada que actualizar:
  *
  *   https://github.com/<owner>/<repo>/releases/latest/download/latest.json
  *
- * Es una descarga por HTTPS desde tu propio repositorio. Ademas Android verifica la
- * firma del APK antes de instalarlo: si no esta firmado con tu misma llave, el sistema
- * rechaza la actualizacion. Y toda instalacion pide confirmacion explicita en pantalla.
+ * Es una descarga por HTTPS desde tu propio repositorio. Android verifica ademas
+ * la firma del APK antes de instalarlo: si no lleva tu misma llave, el sistema
+ * rechaza la actualizacion. Y toda instalacion pide confirmacion en pantalla.
  */
 object UpdateChecker {
 
@@ -35,26 +44,42 @@ object UpdateChecker {
         .followRedirects(true)
         .build()
 
-    private val manifestUrl: String
+    val manifestUrl: String
         get() = "https://github.com/${BuildConfig.UPDATE_OWNER}/" +
                 "${BuildConfig.UPDATE_REPO}/releases/latest/download/latest.json"
 
     /**
-     * Devuelve la informacion de actualizacion solo si hay una version MAS NUEVA
-     * que la instalada. Devuelve null si ya estas al dia o si algo falla:
-     * un fallo al comprobar nunca debe impedir usar la app.
+     * Comprobacion silenciosa del arranque: devuelve la actualizacion solo si
+     * hay una version mas nueva. Cualquier fallo se traga, porque no poder
+     * comprobar nunca debe impedir usar la app.
      */
-    suspend fun check(currentVersionCode: Int): UpdateInfo? = withContext(Dispatchers.IO) {
-        runCatching {
+    suspend fun check(currentVersionCode: Int): UpdateInfo? =
+        (comprobar(currentVersionCode) as? UpdateResult.Disponible)?.info
+
+    /** Comprobacion explicita: informa de lo que ha ocurrido. */
+    suspend fun comprobar(currentVersionCode: Int): UpdateResult = withContext(Dispatchers.IO) {
+        try {
             val request = Request.Builder()
                 .url(manifestUrl)
                 .header("User-Agent", "MiReproductorTV")
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val json = JSONObject(response.body?.string().orEmpty())
+                if (response.code == 404) {
+                    return@withContext UpdateResult.SinPublicaciones
+                }
+                if (!response.isSuccessful) {
+                    return@withContext UpdateResult.Error(
+                        "El servidor respondio ${response.code}."
+                    )
+                }
 
+                val cuerpo = response.body?.string().orEmpty()
+                if (cuerpo.isBlank()) {
+                    return@withContext UpdateResult.Error("La respuesta llego vacia.")
+                }
+
+                val json = JSONObject(cuerpo)
                 val info = UpdateInfo(
                     versionCode = json.getInt("versionCode"),
                     versionName = json.optString("versionName", "?"),
@@ -62,13 +87,20 @@ object UpdateChecker {
                     notes = json.optString("notes", "")
                 )
 
-                // Solo aceptamos APKs servidos por GitHub sobre HTTPS.
-                val trusted = info.apkUrl.startsWith("https://github.com/") ||
-                              info.apkUrl.startsWith("https://objects.githubusercontent.com/")
-                if (!trusted) return@withContext null
+                // Solo se aceptan APKs servidos por GitHub sobre HTTPS.
+                val fiable = info.apkUrl.startsWith("https://github.com/") ||
+                             info.apkUrl.startsWith("https://objects.githubusercontent.com/")
+                if (!fiable) {
+                    return@withContext UpdateResult.Error(
+                        "La direccion de descarga no es de GitHub; se ignora por seguridad."
+                    )
+                }
 
-                if (info.versionCode > currentVersionCode) info else null
+                if (info.versionCode > currentVersionCode) UpdateResult.Disponible(info)
+                else UpdateResult.AlDia
             }
-        }.getOrNull()
+        } catch (e: Exception) {
+            UpdateResult.Error(e.message ?: "No se pudo conectar.")
+        }
     }
 }
