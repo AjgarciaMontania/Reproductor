@@ -1,0 +1,27 @@
+# Compilacion
+build/
+app/build/
+.gradle/
+*.apk
+*.aab
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Llaves de firma: NUNCA subir al repositorio
+*.jks
+*.keystore
+keystore.properties
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Restos del sandbox (borrala a mano)
+_to_delete/
+tvplayer/
