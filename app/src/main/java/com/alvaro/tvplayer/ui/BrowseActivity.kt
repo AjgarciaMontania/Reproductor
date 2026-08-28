@@ -1,3 +1,5 @@
+@file:OptIn(androidx.tv.material3.ExperimentalTvMaterial3Api::class)
+
 package com.alvaro.tvplayer.ui
 
 import android.content.Intent
@@ -5,27 +7,32 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.tv.material3.*
+import androidx.tv.material3.Icon
+import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import com.alvaro.tvplayer.data.Channel
 import com.alvaro.tvplayer.data.PlaylistHolder
@@ -37,15 +44,13 @@ class BrowseActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val playlist = PlaylistHolder.current
-        if (playlist == null) {
+        if (PlaylistHolder.current == null) {
             finish()
             return
         }
         setContent { TvTheme { BrowseScreen() } }
     }
 
-    @OptIn(ExperimentalTvMaterial3Api::class)
     @Composable
     private fun BrowseScreen() {
         val playlist = PlaylistHolder.current ?: return
@@ -54,7 +59,7 @@ class BrowseActivity : ComponentActivity() {
         var favorites by remember { mutableStateOf(prefs.favorites()) }
         var query by remember { mutableStateOf("") }
 
-        val groups = remember(playlist, favorites) {
+        val groups = remember(playlist) {
             buildList {
                 add(FAVORITES)
                 addAll(playlist.groups)
@@ -71,31 +76,32 @@ class BrowseActivity : ComponentActivity() {
             else base.filter { it.name.contains(query.trim(), ignoreCase = true) }
         }
 
-        Row(
-            Modifier
-                .fillMaxSize()
-                .background(Bg)
-        ) {
+        // Foco inicial para el control remoto
+        val firstGroupFocus = remember { FocusRequester() }
+        LaunchedEffect(Unit) { runCatching { firstGroupFocus.requestFocus() } }
+
+        Row(Modifier.fillMaxSize().background(Bg)) {
+
             // ---- Panel lateral de categorias ----
             Column(
                 Modifier
-                    .width(280.dp)
+                    .width(250.dp)
                     .fillMaxHeight()
                     .background(Surface1)
-                    .padding(vertical = 20.dp)
+                    .padding(vertical = 16.dp)
             ) {
                 Text(
                     "Categorias",
                     color = Color.White,
-                    fontSize = 17.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(start = 20.dp, bottom = 12.dp)
+                    modifier = Modifier.padding(start = 18.dp, bottom = 10.dp)
                 )
                 LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(groups) { group ->
+                    itemsIndexed(groups) { index, group ->
                         val count = if (group == FAVORITES) {
                             playlist.channels.count { it.id in favorites }
                         } else {
@@ -105,7 +111,9 @@ class BrowseActivity : ComponentActivity() {
                             label = group,
                             count = count,
                             selected = group == selectedGroup,
-                            onClick = { selectedGroup = group }
+                            onClick = { selectedGroup = group },
+                            modifier = if (index == 0) Modifier.focusRequester(firstGroupFocus)
+                                       else Modifier
                         )
                     }
                 }
@@ -116,14 +124,14 @@ class BrowseActivity : ComponentActivity() {
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .padding(horizontal = 32.dp, vertical = 20.dp)
+                    .padding(horizontal = 22.dp, vertical = 16.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
                             selectedGroup,
                             color = Color.White,
-                            fontSize = 24.sp,
+                            fontSize = 21.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -131,30 +139,30 @@ class BrowseActivity : ComponentActivity() {
                         Text(
                             "${visible.size} canales  ·  ${playlist.channels.size} en total",
                             color = TextMuted,
-                            fontSize = 13.sp
+                            fontSize = 12.sp
                         )
                     }
                     SearchField(query) { query = it }
                 }
 
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(14.dp))
 
                 if (visible.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             if (selectedGroup == FAVORITES)
-                                "Aun no tienes favoritos.\nMarca uno manteniendo OK sobre un canal."
+                                "Aun no tienes favoritos.\nManten pulsado un canal para marcarlo."
                             else "Sin resultados.",
                             color = TextMuted,
-                            fontSize = 15.sp
+                            fontSize = 14.sp
                         )
                     }
                 } else {
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 190.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        contentPadding = PaddingValues(bottom = 24.dp)
+                        columns = GridCells.Adaptive(minSize = 165.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(bottom = 20.dp)
                     ) {
                         items(visible, key = { it.id }) { channel ->
                             ChannelCard(
@@ -181,29 +189,33 @@ class BrowseActivity : ComponentActivity() {
         )
     }
 
-    @OptIn(ExperimentalTvMaterial3Api::class)
     @Composable
-    private fun GroupItem(label: String, count: Int, selected: Boolean, onClick: () -> Unit) {
-        var focused by remember { mutableStateOf(false) }
-        Card(
+    private fun GroupItem(
+        label: String,
+        count: Int,
+        selected: Boolean,
+        onClick: () -> Unit,
+        modifier: Modifier = Modifier
+    ) {
+        FocusableCard(
             onClick = onClick,
-            modifier = Modifier
-                .fillMaxWidth()
-                .onFocusChanged { focused = it.isFocused },
-            colors = CardDefaults.colors(
-                containerColor = if (selected) Surface2 else Color.Transparent,
-                focusedContainerColor = Accent
-            )
-        ) {
+            modifier = modifier.fillMaxWidth(),
+            containerColor = if (selected) Surface2 else Color.Transparent,
+            focusedContainerColor = Accent
+        ) { active ->
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                    .padding(horizontal = 13.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     label,
-                    color = if (focused) Color.White else if (selected) Accent else TextMuted,
+                    color = when {
+                        active -> Color.White
+                        selected -> Accent
+                        else -> TextMuted
+                    },
                     fontSize = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -211,14 +223,13 @@ class BrowseActivity : ComponentActivity() {
                 )
                 Text(
                     "$count",
-                    color = if (focused) Color.White else TextMuted,
+                    color = if (active) Color.White else TextMuted,
                     fontSize = 12.sp
                 )
             }
         }
     }
 
-    @OptIn(ExperimentalTvMaterial3Api::class)
     @Composable
     private fun ChannelCard(
         channel: Channel,
@@ -226,22 +237,16 @@ class BrowseActivity : ComponentActivity() {
         onClick: () -> Unit,
         onLongClick: () -> Unit
     ) {
-        var focused by remember { mutableStateOf(false) }
-        Card(
+        FocusableCard(
             onClick = onClick,
             onLongClick = onLongClick,
-            modifier = Modifier.onFocusChanged { focused = it.isFocused },
-            colors = CardDefaults.colors(
-                containerColor = Surface1,
-                focusedContainerColor = Surface2
-            ),
-            scale = CardDefaults.scale(focusedScale = 1.06f)
-        ) {
-            Column(Modifier.padding(10.dp)) {
+            focusedScale = 1.06f
+        ) { active ->
+            Column(Modifier.padding(9.dp)) {
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(96.dp)
+                        .height(86.dp)
                         .background(Color(0xFF0B0E13), RoundedCorner12),
                     contentAlignment = Alignment.Center
                 ) {
@@ -250,15 +255,13 @@ class BrowseActivity : ComponentActivity() {
                             model = channel.logo,
                             contentDescription = channel.name,
                             contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(10.dp)
+                            modifier = Modifier.fillMaxSize().padding(9.dp)
                         )
                     } else {
                         Text(
                             channel.name.take(2).uppercase(),
                             color = Accent,
-                            fontSize = 26.sp,
+                            fontSize = 24.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -269,20 +272,20 @@ class BrowseActivity : ComponentActivity() {
                             tint = Color(0xFFFFC93C),
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
-                                .padding(6.dp)
-                                .size(16.dp)
+                                .padding(5.dp)
+                                .size(15.dp)
                         )
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(7.dp))
                 Text(
                     channel.name,
-                    color = if (focused) Color.White else Color(0xFFD4D9E0),
-                    fontSize = 13.sp,
+                    color = if (active) Color.White else Color(0xFFD4D9E0),
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.height(34.dp)
+                    modifier = Modifier.height(32.dp)
                 )
             }
         }
@@ -291,11 +294,13 @@ class BrowseActivity : ComponentActivity() {
     @Composable
     private fun SearchField(value: String, onValueChange: (String) -> Unit) {
         var focused by remember { mutableStateOf(false) }
+        val fieldFocus = remember { FocusRequester() }
         Box(
             Modifier
-                .width(260.dp)
+                .width(220.dp)
                 .background(if (focused) Surface2 else Surface1, RoundedCorner12)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .clickable { runCatching { fieldFocus.requestFocus() } }
+                .padding(horizontal = 14.dp, vertical = 11.dp)
         ) {
             if (value.isEmpty()) {
                 Text("Buscar canal...", color = TextMuted, fontSize = 13.sp)
@@ -305,9 +310,10 @@ class BrowseActivity : ComponentActivity() {
                 onValueChange = onValueChange,
                 singleLine = true,
                 textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(Accent),
+                cursorBrush = SolidColor(Accent),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .focusRequester(fieldFocus)
                     .onFocusChanged { focused = it.isFocused }
             )
         }

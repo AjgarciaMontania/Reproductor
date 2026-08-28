@@ -1,3 +1,5 @@
+@file:OptIn(androidx.tv.material3.ExperimentalTvMaterial3Api::class)
+
 package com.alvaro.tvplayer.ui
 
 import android.content.Intent
@@ -6,9 +8,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -17,19 +21,21 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
-import androidx.tv.material3.*
+import androidx.tv.material3.Icon
+import androidx.tv.material3.Text
 import com.alvaro.tvplayer.data.*
 import kotlinx.coroutines.launch
 
@@ -40,7 +46,6 @@ class SourceActivity : ComponentActivity() {
         setContent { TvTheme { SourceScreen() } }
     }
 
-    @OptIn(ExperimentalTvMaterial3Api::class)
     @Composable
     private fun SourceScreen() {
         val prefs = remember { Prefs(this) }
@@ -48,6 +53,11 @@ class SourceActivity : ComponentActivity() {
         var error by remember { mutableStateOf<String?>(null) }
         var customUrl by remember { mutableStateOf("") }
         var recents by remember { mutableStateOf(prefs.recentPlaylists()) }
+
+        // Xtream Codes
+        var xHost by remember { mutableStateOf("") }
+        var xUser by remember { mutableStateOf("") }
+        var xPass by remember { mutableStateOf("") }
 
         // ---- Actualizacion automatica ----
         val activity = this
@@ -63,10 +73,7 @@ class SourceActivity : ComponentActivity() {
             }.getOrDefault(1)
         }
 
-        // Se consulta al abrir la app. Si falla, no molesta: simplemente no hay aviso.
-        LaunchedEffect(Unit) {
-            update = UpdateChecker.check(currentVersionCode)
-        }
+        LaunchedEffect(Unit) { update = UpdateChecker.check(currentVersionCode) }
 
         DisposableEffect(Unit) {
             val receiver = UpdateInstaller.registerStatusReceiver(activity) { msg ->
@@ -76,29 +83,9 @@ class SourceActivity : ComponentActivity() {
             onDispose { runCatching { activity.unregisterReceiver(receiver) } }
         }
 
-        fun startUpdate(info: UpdateInfo) {
-            if (!UpdateInstaller.canInstall(activity)) {
-                updateMessage = "Autoriza a esta app a instalar aplicaciones y vuelve a intentarlo."
-                runCatching { startActivity(UpdateInstaller.permissionSettingsIntent(activity)) }
-                return
-            }
-            downloadProgress = 0
-            updateMessage = null
-            lifecycleScope.launch {
-                runCatching {
-                    val apk = UpdateInstaller.download(activity, info) { downloadProgress = it }
-                    UpdateInstaller.install(activity, apk)
-                }.onFailure {
-                    downloadProgress = -1
-                    updateMessage = it.message ?: "Fallo la actualizacion."
-                }
-            }
-        }
-
-        // Campos Xtream Codes
-        var xHost by remember { mutableStateOf("") }
-        var xUser by remember { mutableStateOf("") }
-        var xPass by remember { mutableStateOf("") }
+        // Foco inicial: necesario para navegar con el control remoto en TV.
+        val firstItemFocus = remember { FocusRequester() }
+        LaunchedEffect(Unit) { runCatching { firstItemFocus.requestFocus() } }
 
         fun open(url: String) {
             if (loading) return
@@ -121,35 +108,49 @@ class SourceActivity : ComponentActivity() {
             }
         }
 
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Bg)
-        ) {
+        fun startUpdate(info: UpdateInfo) {
+            if (!UpdateInstaller.canInstall(activity)) {
+                updateMessage = "Autoriza a esta app a instalar aplicaciones y vuelve a intentarlo."
+                runCatching { startActivity(UpdateInstaller.permissionSettingsIntent(activity)) }
+                return
+            }
+            downloadProgress = 0
+            updateMessage = null
+            lifecycleScope.launch {
+                runCatching {
+                    val apk = UpdateInstaller.download(activity, info) { downloadProgress = it }
+                    UpdateInstaller.install(activity, apk)
+                }.onFailure {
+                    downloadProgress = -1
+                    updateMessage = it.message ?: "Fallo la actualizacion."
+                }
+            }
+        }
+
+        Box(Modifier.fillMaxSize().background(Bg)) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 48.dp, vertical = 36.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                contentPadding = PaddingValues(horizontal = 28.dp, vertical = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
                     Column {
                         Text(
                             "Mi Reproductor TV",
-                            fontSize = 30.sp,
+                            fontSize = 28.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
                             "Elige un catalogo abierto o carga tu propia lista M3U",
-                            fontSize = 15.sp,
+                            fontSize = 14.sp,
                             color = TextMuted
                         )
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(16.dp))
                     }
                 }
 
-                // ---- Aviso de nueva version ----
                 update?.let { info ->
                     item {
                         UpdateBanner(
@@ -159,57 +160,45 @@ class SourceActivity : ComponentActivity() {
                             onInstall = { startUpdate(info) },
                             onDismiss = { update = null }
                         )
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(12.dp))
                     }
                 }
 
                 if (update == null && updateMessage != null) {
                     item {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(Surface1, RoundedCorner12)
-                                .padding(14.dp)
-                        ) {
-                            Text(updateMessage!!, color = TextMuted, fontSize = 13.sp)
-                        }
-                        Spacer(Modifier.height(10.dp))
-                    }
-                }
-
-                error?.let { msg ->
-                    item {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFF3A1714), RoundedCorner12)
-                                .padding(14.dp)
-                        ) {
-                            Text(msg, color = Color(0xFFFF8A7E), fontSize = 14.sp)
-                        }
-                        Spacer(Modifier.height(6.dp))
+                        InfoBox(updateMessage!!, TextMuted, Surface1)
+                        Spacer(Modifier.height(8.dp))
                     }
                 }
 
                 if (loading) {
                     item {
-                        Text("Cargando lista...", color = Accent, fontSize = 16.sp)
-                        Spacer(Modifier.height(6.dp))
+                        InfoBox("Cargando lista, espera un momento...", Accent, Surface1)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+
+                error?.let { msg ->
+                    item {
+                        InfoBox(msg, Color(0xFFFF8A7E), Color(0xFF3A1714))
+                        Spacer(Modifier.height(8.dp))
                     }
                 }
 
                 item { SectionTitle("Catalogos abiertos") }
 
-                items(Catalogs.presets) { cat ->
+                itemsIndexed(Catalogs.presets) { index, cat ->
                     RowCard(
                         title = cat.title,
                         subtitle = cat.subtitle,
-                        onClick = { open(cat.url) }
+                        onClick = { open(cat.url) },
+                        modifier = if (index == 0) Modifier.focusRequester(firstItemFocus)
+                                   else Modifier
                     )
                 }
 
                 item {
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(16.dp))
                     SectionTitle("Tu propia lista")
                     Text(
                         "Pega la URL de tu lista M3U / M3U8",
@@ -223,8 +212,7 @@ class SourceActivity : ComponentActivity() {
                     UrlField(
                         value = customUrl,
                         onValueChange = { customUrl = it },
-                        placeholder = "http://servidor/lista.m3u",
-                        onDone = { if (customUrl.isNotBlank()) open(customUrl.trim()) }
+                        placeholder = "http://servidor/lista.m3u"
                     )
                     Spacer(Modifier.height(8.dp))
                     ActionButton("Cargar esta lista") {
@@ -233,7 +221,7 @@ class SourceActivity : ComponentActivity() {
                 }
 
                 item {
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(16.dp))
                     SectionTitle("Xtream Codes")
                     Text(
                         "Si tu proveedor te dio servidor, usuario y clave",
@@ -258,14 +246,14 @@ class SourceActivity : ComponentActivity() {
 
                 if (recents.isNotEmpty()) {
                     item {
-                        Spacer(Modifier.height(18.dp))
+                        Spacer(Modifier.height(16.dp))
                         SectionTitle("Listas recientes")
                     }
                     items(recents) { url ->
                         RowCard(
                             title = url.substringAfterLast('/').take(60).ifBlank { url },
                             subtitle = url,
-                            trailingLabel = "Quitar",
+                            hint = "Manten pulsado para quitar",
                             onClick = { open(url) },
                             onLongClick = {
                                 prefs.removeRecentPlaylist(url)
@@ -276,22 +264,146 @@ class SourceActivity : ComponentActivity() {
                 }
 
                 item {
-                    Spacer(Modifier.height(28.dp))
+                    Spacer(Modifier.height(24.dp))
                     Text(
-                        buildAnnotatedString {
-                            withStyle(SpanStyle(color = TextMuted, fontSize = 12.sp)) {
-                                append("Los catalogos precargados provienen del proyecto abierto iptv-org (CC0), ")
-                                append("que recopila señales publicadas de forma abierta por sus emisores. ")
-                                append("Esta app no aloja ni redistribuye contenido: solo reproduce la lista que tu elijas.")
-                            }
-                        }
+                        "Los catalogos precargados provienen del proyecto abierto iptv-org (CC0), " +
+                        "que recopila señales publicadas de forma abierta por sus emisores. " +
+                        "Esta app no aloja ni redistribuye contenido: solo reproduce la lista que elijas.",
+                        color = TextMuted,
+                        fontSize = 12.sp
                     )
                 }
             }
         }
     }
 
-    @OptIn(ExperimentalTvMaterial3Api::class)
+    @Composable
+    private fun InfoBox(text: String, textColor: Color, bg: Color) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .background(bg, RoundedCorner12)
+                .padding(14.dp)
+        ) {
+            Text(text, color = textColor, fontSize = 14.sp)
+        }
+    }
+
+    @Composable
+    private fun SectionTitle(text: String) {
+        Text(
+            text,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White,
+            modifier = Modifier.padding(bottom = 10.dp)
+        )
+    }
+
+    @Composable
+    private fun RowCard(
+        title: String,
+        subtitle: String,
+        onClick: () -> Unit,
+        modifier: Modifier = Modifier,
+        hint: String? = null,
+        onLongClick: (() -> Unit)? = null
+    ) {
+        FocusableCard(
+            onClick = onClick,
+            onLongClick = onLongClick,
+            modifier = modifier.fillMaxWidth()
+        ) { active ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 15.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (active) Accent else Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        subtitle,
+                        fontSize = 12.5.sp,
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (hint != null && active) {
+                    Text(hint, fontSize = 11.sp, color = TextMuted)
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ActionButton(label: String, onClick: () -> Unit) {
+        FocusableCard(
+            onClick = onClick,
+            containerColor = Surface2,
+            focusedContainerColor = Accent
+        ) { active ->
+            Row(
+                Modifier.padding(horizontal = 20.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    tint = if (active) Color.White else Accent
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(label, color = Color.White, fontSize = 15.sp)
+            }
+        }
+    }
+
+    @Composable
+    private fun UrlField(
+        value: String,
+        onValueChange: (String) -> Unit,
+        placeholder: String
+    ) {
+        var focused by remember { mutableStateOf(false) }
+        val fieldFocus = remember { FocusRequester() }
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .background(if (focused) Surface2 else Surface1, RoundedCorner12)
+                // Un toque en cualquier parte del recuadro lleva el cursor al campo
+                .clickable { runCatching { fieldFocus.requestFocus() } }
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+        ) {
+            if (value.isEmpty()) {
+                Text(placeholder, color = TextMuted, fontSize = 14.sp)
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                cursorBrush = SolidColor(Accent),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Uri,
+                    imeAction = ImeAction.Done
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(fieldFocus)
+                    .onFocusChanged { focused = it.isFocused }
+            )
+        }
+    }
+
     @Composable
     private fun UpdateBanner(
         info: UpdateInfo,
@@ -312,7 +424,7 @@ class SourceActivity : ComponentActivity() {
                 Text(
                     "Nueva version disponible: ${info.versionName}",
                     color = Color.White,
-                    fontSize = 17.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -348,143 +460,36 @@ class SourceActivity : ComponentActivity() {
                     }
                 }
 
-                progress == 100 -> Text(
-                    "Preparando la instalacion...",
-                    color = Accent,
-                    fontSize = 14.sp
-                )
+                progress == 100 -> Text("Preparando la instalacion...", color = Accent, fontSize = 14.sp)
 
                 else -> Row {
-                    Button(
+                    FocusableCard(
                         onClick = onInstall,
-                        colors = ButtonDefaults.colors(
-                            containerColor = Surface2,
-                            focusedContainerColor = Accent,
-                            contentColor = Color.White,
-                            focusedContentColor = Color.White
+                        containerColor = Surface2,
+                        focusedContainerColor = Accent
+                    ) {
+                        Text(
+                            "Actualizar ahora",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 11.dp)
                         )
-                    ) { Text("Actualizar ahora") }
-
+                    }
                     Spacer(Modifier.width(10.dp))
-
-                    Button(
+                    FocusableCard(
                         onClick = onDismiss,
-                        colors = ButtonDefaults.colors(
-                            containerColor = Color.Transparent,
-                            focusedContainerColor = Surface2,
-                            contentColor = TextMuted,
-                            focusedContentColor = Color.White
+                        containerColor = Color.Transparent,
+                        focusedContainerColor = Surface2
+                    ) { active ->
+                        Text(
+                            "Ahora no",
+                            color = if (active) Color.White else TextMuted,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 11.dp)
                         )
-                    ) { Text("Ahora no") }
+                    }
                 }
             }
-        }
-    }
-
-    @Composable
-    private fun SectionTitle(text: String) {
-        Text(
-            text,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White,
-            modifier = Modifier.padding(bottom = 10.dp)
-        )
-    }
-
-    @OptIn(ExperimentalTvMaterial3Api::class)
-    @Composable
-    private fun RowCard(
-        title: String,
-        subtitle: String,
-        trailingLabel: String? = null,
-        onClick: () -> Unit,
-        onLongClick: (() -> Unit)? = null
-    ) {
-        var focused by remember { mutableStateOf(false) }
-        Card(
-            onClick = onClick,
-            onLongClick = onLongClick ?: {},
-            modifier = Modifier
-                .fillMaxWidth()
-                .onFocusChanged { focused = it.isFocused },
-            colors = CardDefaults.colors(
-                containerColor = Surface1,
-                focusedContainerColor = Surface2
-            )
-        ) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        title,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (focused) Accent else Color.White,
-                        maxLines = 1
-                    )
-                    Text(subtitle, fontSize = 12.5.sp, color = TextMuted, maxLines = 1)
-                }
-                if (trailingLabel != null && focused) {
-                    Text("Mantener OK: $trailingLabel", fontSize = 11.sp, color = TextMuted)
-                }
-            }
-        }
-    }
-
-    @OptIn(ExperimentalTvMaterial3Api::class)
-    @Composable
-    private fun ActionButton(label: String, onClick: () -> Unit) {
-        Button(
-            onClick = onClick,
-            colors = ButtonDefaults.colors(
-                containerColor = Surface2,
-                focusedContainerColor = Accent,
-                contentColor = Color.White,
-                focusedContentColor = Color.White
-            )
-        ) {
-            Icon(Icons.Default.PlayArrow, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text(label)
-        }
-    }
-
-    @Composable
-    private fun UrlField(
-        value: String,
-        onValueChange: (String) -> Unit,
-        placeholder: String,
-        onDone: (() -> Unit)? = null
-    ) {
-        var focused by remember { mutableStateOf(false) }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .background(if (focused) Surface2 else Surface1, RoundedCorner12)
-                .padding(horizontal = 16.dp, vertical = 13.dp)
-        ) {
-            if (value.isEmpty()) {
-                Text(placeholder, color = TextMuted, fontSize = 14.sp)
-            }
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                singleLine = true,
-                textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(Accent),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Uri,
-                    imeAction = ImeAction.Done
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onFocusChanged { focused = it.isFocused }
-            )
         }
     }
 }

@@ -25,10 +25,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MiReproductorTV">
 
+        <!--
+          Orientacion libre en las pantallas de navegacion: en el televisor siempre
+          es horizontal, y asi tambien se puede probar comodamente en un celular.
+        -->
         <activity
             android:name=".ui.SourceActivity"
             android:exported="true"
-            android:screenOrientation="landscape"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -40,7 +43,6 @@
         <activity
             android:name=".ui.BrowseActivity"
             android:exported="false"
-            android:screenOrientation="landscape"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode" />
 
         <activity

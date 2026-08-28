@@ -1,3 +1,5 @@
+@file:OptIn(androidx.tv.material3.ExperimentalTvMaterial3Api::class)
+
 package com.alvaro.tvplayer.ui
 
 import android.os.Bundle
@@ -10,6 +12,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -162,7 +165,14 @@ class PlayerActivity : ComponentActivity() {
             onDispose { keyHandler = null }
         }
 
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                // Un toque en la pantalla muestra u oculta la informacion.
+                // En el control remoto lo hace el boton OK (ver onKeyDown).
+                .clickable { showInfo = !showInfo }
+        ) {
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
@@ -240,11 +250,35 @@ class PlayerActivity : ComponentActivity() {
                             fontSize = 13.sp
                         )
                     }
-                    Text(
-                        "OK: info   ·   ARRIBA/ABAJO: cambiar   ·   ATRAS: salir",
-                        color = TextMuted,
-                        fontSize = 11.sp
-                    )
+                    // Botones tactiles para cambiar de canal. Con el control
+                    // remoto se usan las flechas arriba/abajo, que siguen activas.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        FocusableCard(
+                            onClick = { index = if (index == 0) queue.lastIndex else index - 1 },
+                            containerColor = Color(0x33FFFFFF),
+                            focusedContainerColor = Accent
+                        ) {
+                            Text(
+                                "◄ Anterior",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        FocusableCard(
+                            onClick = { index = if (index == queue.lastIndex) 0 else index + 1 },
+                            containerColor = Color(0x33FFFFFF),
+                            focusedContainerColor = Accent
+                        ) {
+                            Text(
+                                "Siguiente ►",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
