@@ -1,0 +1,108 @@
+name: Publicar version
+
+# Se dispara al crear una etiqueta v1.0, v1.1, ... o a mano desde la pestaña Actions.
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Nombre de version (ej: 1.1)'
+        required: true
+        default: '1.0'
+      notas:
+        description: 'Que cambia en esta version'
+        required: false
+        default: 'Mejoras y correcciones.'
+
+permissions:
+  contents: write   # necesario para crear el Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar el codigo
+        uses: actions/checkout@v4
+
+      - name: Preparar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar el SDK de Android
+        uses: android-actions/setup-android@v3
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Calcular version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            NAME="${GITHUB_REF_NAME#v}"
+            NOTES="Version ${NAME}"
+          else
+            NAME="${{ github.event.inputs.version }}"
+            NOTES="${{ github.event.inputs.notas }}"
+          fi
+          # El versionCode usa el numero de ejecucion: siempre sube, nunca se repite.
+          echo "name=${NAME}"        >> "$GITHUB_OUTPUT"
+          echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "notes=${NOTES}"      >> "$GITHUB_OUTPUT"
+          echo "tag=v${NAME}"        >> "$GITHUB_OUTPUT"
+
+      - name: Restaurar el keystore desde el secret
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/mi-tv.jks"
+          echo "Keystore restaurado ($(stat -c%s "$RUNNER_TEMP/mi-tv.jks") bytes)"
+
+      - name: Compilar APK firmado
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/mi-tv.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          VERSION_CODE: ${{ steps.v.outputs.code }}
+          VERSION_NAME: ${{ steps.v.outputs.name }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Preparar artefactos
+        id: art
+        run: |
+          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          if [ -z "$APK" ]; then echo "No se genero ningun APK"; exit 1; fi
+          DEST="MiReproductorTV-${{ steps.v.outputs.tag }}.apk"
+          cp "$APK" "$DEST"
+          echo "apk=${DEST}" >> "$GITHUB_OUTPUT"
+
+          # Este JSON es lo que consulta la app para saber si hay version nueva.
+          cat > latest.json <<EOF
+          {
+            "versionCode": ${{ steps.v.outputs.code }},
+            "versionName": "${{ steps.v.outputs.name }}",
+            "apkUrl": "https://github.com/${{ github.repository }}/releases/download/${{ steps.v.outputs.tag }}/${DEST}",
+            "notes": "${{ steps.v.outputs.notes }}"
+          }
+          EOF
+          echo "--- latest.json ---"
+          cat latest.json
+
+      - name: Verificar la firma del APK
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "${{ steps.art.outputs.apk }}"
+
+      - name: Publicar el Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          name: ${{ steps.v.outputs.tag }}
+          body: ${{ steps.v.outputs.notes }}
+          files: |
+            ${{ steps.art.outputs.apk }}
+            latest.json

@@ -1,8 +1,43 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+/*
+ * FIRMA
+ * -----
+ * La llave es lo que permite ACTUALIZAR la app sin desinstalarla: Android exige
+ * que la version nueva este firmada con la misma llave que la instalada. Si cambia,
+ * la instalacion falla con "aplicacion no instalada".
+ *
+ * Se lee de dos sitios, en este orden:
+ *   1. keystore.properties en la raiz del proyecto  (compilacion local)
+ *   2. variables de entorno                          (GitHub Actions)
+ *
+ * NUNCA subas el .jks ni keystore.properties al repositorio: estan en .gitignore.
+ */
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+
+fun signingValue(propKey: String, envKey: String): String? =
+    keystoreProps.getProperty(propKey) ?: System.getenv(envKey)
+
+val ksFile = signingValue("storeFile", "KEYSTORE_FILE")
+val ksPassword = signingValue("storePassword", "KEYSTORE_PASSWORD")
+val ksAlias = signingValue("keyAlias", "KEY_ALIAS")
+val ksKeyPassword = signingValue("keyPassword", "KEY_PASSWORD")
+val hasSigning = !ksFile.isNullOrBlank() && !ksPassword.isNullOrBlank() &&
+                 !ksAlias.isNullOrBlank() && !ksKeyPassword.isNullOrBlank()
+
+// El versionCode debe SUBIR en cada release o el dispositivo rechaza la actualizacion.
+// En CI lo inyecta el workflow con el numero de ejecucion; en local queda en 1.
+val buildVersionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
+val buildVersionName = System.getenv("VERSION_NAME") ?: "1.0"
 
 android {
     namespace = "com.alvaro.tvplayer"
@@ -12,29 +47,30 @@ android {
         applicationId = "com.alvaro.tvplayer"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildVersionCode
+        versionName = buildVersionName
+
+        // Datos del repositorio de donde se bajan las actualizaciones.
+        buildConfigField("String", "UPDATE_OWNER", "\"AjgarciaMontania\"")
+        buildConfigField("String", "UPDATE_REPO", "\"Reproductor\"")
     }
 
-    // Genera un keystore propio con:
-    //   keytool -genkey -v -keystore mi-tv.jks -alias mitv -keyalg RSA -keysize 2048 -validity 10000
-    // y descomenta este bloque poniendo tus datos.
-    /*
     signingConfigs {
-        create("release") {
-            storeFile = file("../mi-tv.jks")
-            storePassword = "TU_PASSWORD"
-            keyAlias = "mitv"
-            keyPassword = "TU_PASSWORD"
+        if (hasSigning) {
+            create("release") {
+                storeFile = file(ksFile!!)
+                storePassword = ksPassword
+                keyAlias = ksAlias
+                keyPassword = ksKeyPassword
+            }
         }
     }
-    */
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // signingConfig = signingConfigs.getByName("release")
+            if (hasSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -43,7 +79,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }

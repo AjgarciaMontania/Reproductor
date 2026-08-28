@@ -17,11 +17,12 @@ captures/
 *.jks
 *.keystore
 keystore.properties
+keystore_base64.txt
 
 # Sistema
 .DS_Store
 Thumbs.db
 
 # Restos del sandbox (borrala a mano)
-_to_delete/
-tvplayer/
+/_to_delete/
+/tvplayer/

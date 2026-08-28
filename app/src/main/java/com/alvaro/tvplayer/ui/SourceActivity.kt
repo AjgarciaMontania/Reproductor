@@ -1,6 +1,7 @@
 package com.alvaro.tvplayer.ui
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,6 +13,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +48,52 @@ class SourceActivity : ComponentActivity() {
         var error by remember { mutableStateOf<String?>(null) }
         var customUrl by remember { mutableStateOf("") }
         var recents by remember { mutableStateOf(prefs.recentPlaylists()) }
+
+        // ---- Actualizacion automatica ----
+        val activity = this
+        var update by remember { mutableStateOf<UpdateInfo?>(null) }
+        var updateMessage by remember { mutableStateOf<String?>(null) }
+        var downloadProgress by remember { mutableIntStateOf(-1) }
+
+        val currentVersionCode = remember {
+            runCatching {
+                val info = packageManager.getPackageInfo(packageName, 0)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode.toInt()
+                else @Suppress("DEPRECATION") info.versionCode
+            }.getOrDefault(1)
+        }
+
+        // Se consulta al abrir la app. Si falla, no molesta: simplemente no hay aviso.
+        LaunchedEffect(Unit) {
+            update = UpdateChecker.check(currentVersionCode)
+        }
+
+        DisposableEffect(Unit) {
+            val receiver = UpdateInstaller.registerStatusReceiver(activity) { msg ->
+                updateMessage = msg
+                downloadProgress = -1
+            }
+            onDispose { runCatching { activity.unregisterReceiver(receiver) } }
+        }
+
+        fun startUpdate(info: UpdateInfo) {
+            if (!UpdateInstaller.canInstall(activity)) {
+                updateMessage = "Autoriza a esta app a instalar aplicaciones y vuelve a intentarlo."
+                runCatching { startActivity(UpdateInstaller.permissionSettingsIntent(activity)) }
+                return
+            }
+            downloadProgress = 0
+            updateMessage = null
+            lifecycleScope.launch {
+                runCatching {
+                    val apk = UpdateInstaller.download(activity, info) { downloadProgress = it }
+                    UpdateInstaller.install(activity, apk)
+                }.onFailure {
+                    downloadProgress = -1
+                    updateMessage = it.message ?: "Fallo la actualizacion."
+                }
+            }
+        }
 
         // Campos Xtream Codes
         var xHost by remember { mutableStateOf("") }
@@ -98,6 +146,34 @@ class SourceActivity : ComponentActivity() {
                             color = TextMuted
                         )
                         Spacer(Modifier.height(20.dp))
+                    }
+                }
+
+                // ---- Aviso de nueva version ----
+                update?.let { info ->
+                    item {
+                        UpdateBanner(
+                            info = info,
+                            progress = downloadProgress,
+                            message = updateMessage,
+                            onInstall = { startUpdate(info) },
+                            onDismiss = { update = null }
+                        )
+                        Spacer(Modifier.height(14.dp))
+                    }
+                }
+
+                if (update == null && updateMessage != null) {
+                    item {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(Surface1, RoundedCorner12)
+                                .padding(14.dp)
+                        ) {
+                            Text(updateMessage!!, color = TextMuted, fontSize = 13.sp)
+                        }
+                        Spacer(Modifier.height(10.dp))
                     }
                 }
 
@@ -210,6 +286,96 @@ class SourceActivity : ComponentActivity() {
                             }
                         }
                     )
+                }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalTvMaterial3Api::class)
+    @Composable
+    private fun UpdateBanner(
+        info: UpdateInfo,
+        progress: Int,
+        message: String?,
+        onInstall: () -> Unit,
+        onDismiss: () -> Unit
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF10233F), RoundedCorner12)
+                .padding(18.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Refresh, contentDescription = null, tint = Accent)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Nueva version disponible: ${info.versionName}",
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            if (info.notes.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(info.notes, color = TextMuted, fontSize = 13.sp, maxLines = 3)
+            }
+
+            message?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, color = Color(0xFFFFCF5C), fontSize = 13.sp)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            when {
+                progress in 0..99 -> {
+                    Text("Descargando... $progress%", color = Accent, fontSize = 14.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .background(Surface2, RoundedCorner12)
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(progress / 100f)
+                                .height(6.dp)
+                                .background(Accent, RoundedCorner12)
+                        )
+                    }
+                }
+
+                progress == 100 -> Text(
+                    "Preparando la instalacion...",
+                    color = Accent,
+                    fontSize = 14.sp
+                )
+
+                else -> Row {
+                    Button(
+                        onClick = onInstall,
+                        colors = ButtonDefaults.colors(
+                            containerColor = Surface2,
+                            focusedContainerColor = Accent,
+                            contentColor = Color.White,
+                            focusedContentColor = Color.White
+                        )
+                    ) { Text("Actualizar ahora") }
+
+                    Spacer(Modifier.width(10.dp))
+
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.colors(
+                            containerColor = Color.Transparent,
+                            focusedContainerColor = Surface2,
+                            contentColor = TextMuted,
+                            focusedContentColor = Color.White
+                        )
+                    ) { Text("Ahora no") }
                 }
             }
         }
