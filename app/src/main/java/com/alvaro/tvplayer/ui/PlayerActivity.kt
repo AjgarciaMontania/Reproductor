@@ -37,6 +37,8 @@ import androidx.media3.ui.PlayerView
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import com.alvaro.tvplayer.data.Channel
+import com.alvaro.tvplayer.data.ChannelChecker
+import com.alvaro.tvplayer.data.PlaybackErrors
 import com.alvaro.tvplayer.data.Prefs
 import kotlinx.coroutines.delay
 
@@ -122,12 +124,18 @@ class PlayerActivity : ComponentActivity() {
             val listener = object : Player.Listener {
                 override fun onPlayerError(e: PlaybackException) {
                     buffering = false
-                    error = "No se pudo reproducir este canal.\n${e.errorCodeName}"
+                    error = PlaybackErrors.describe(e)
+                    // Un fallo real de reproduccion es la mejor prueba de que
+                    // el canal no sirve: se refleja en el semaforo de la grilla.
+                    queue.getOrNull(index)?.let { ChannelChecker.marcarCaido(it) }
                 }
 
                 override fun onPlaybackStateChanged(state: Int) {
                     buffering = state == Player.STATE_BUFFERING
-                    if (state == Player.STATE_READY) error = null
+                    if (state == Player.STATE_READY) {
+                        error = null
+                        queue.getOrNull(index)?.let { ChannelChecker.marcarOk(it) }
+                    }
                 }
             }
             exo.addListener(listener)

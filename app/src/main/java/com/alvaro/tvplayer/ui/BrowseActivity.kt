@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
@@ -31,16 +32,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import com.alvaro.tvplayer.data.Channel
+import com.alvaro.tvplayer.data.ChannelChecker
+import com.alvaro.tvplayer.data.ChannelStatus
 import com.alvaro.tvplayer.data.PlaylistHolder
 import com.alvaro.tvplayer.data.Prefs
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 private const val FAVORITES = "★ Favoritos"
 
 class BrowseActivity : ComponentActivity() {
+
+    private var verifyJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +59,11 @@ class BrowseActivity : ComponentActivity() {
         setContent { TvTheme { BrowseScreen() } }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        verifyJob?.cancel()
+    }
+
     @Composable
     private fun BrowseScreen() {
         val playlist = PlaylistHolder.current ?: return
@@ -58,6 +71,7 @@ class BrowseActivity : ComponentActivity() {
 
         var favorites by remember { mutableStateOf(prefs.favorites()) }
         var query by remember { mutableStateOf("") }
+        var ocultarCaidos by remember { mutableStateOf(false) }
 
         val groups = remember(playlist) {
             buildList {
@@ -67,16 +81,24 @@ class BrowseActivity : ComponentActivity() {
         }
         var selectedGroup by remember { mutableStateOf(playlist.groups.firstOrNull() ?: FAVORITES) }
 
-        val visible = remember(selectedGroup, query, favorites, playlist) {
-            val base = when (selectedGroup) {
-                FAVORITES -> playlist.channels.filter { it.id in favorites }
-                else -> playlist.channels.filter { it.group == selectedGroup }
+        // derivedStateOf (y no remember) porque lee el mapa de estados del
+        // verificador, que cambia mientras se comprueban los canales.
+        val visible by remember(selectedGroup, query, favorites, playlist, ocultarCaidos) {
+            derivedStateOf {
+                val base = when (selectedGroup) {
+                    FAVORITES -> playlist.channels.filter { it.id in favorites }
+                    else -> playlist.channels.filter { it.group == selectedGroup }
+                }
+                val buscados =
+                    if (query.isBlank()) base
+                    else base.filter { it.name.contains(query.trim(), ignoreCase = true) }
+
+                if (ocultarCaidos) {
+                    buscados.filter { ChannelChecker.statusOf(it) != ChannelStatus.CAIDO }
+                } else buscados
             }
-            if (query.isBlank()) base
-            else base.filter { it.name.contains(query.trim(), ignoreCase = true) }
         }
 
-        // Foco inicial para el control remoto
         val firstGroupFocus = remember { FocusRequester() }
         LaunchedEffect(Unit) { runCatching { firstGroupFocus.requestFocus() } }
 
@@ -85,7 +107,7 @@ class BrowseActivity : ComponentActivity() {
             // ---- Panel lateral de categorias ----
             Column(
                 Modifier
-                    .width(250.dp)
+                    .width(240.dp)
                     .fillMaxHeight()
                     .background(Surface1)
                     .padding(vertical = 16.dp)
@@ -124,35 +146,65 @@ class BrowseActivity : ComponentActivity() {
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .padding(horizontal = 22.dp, vertical = 16.dp)
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
+                // Titulo + acciones
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
                             selectedGroup,
                             color = Color.White,
-                            fontSize = 21.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            "${visible.size} canales  ·  ${playlist.channels.size} en total",
-                            color = TextMuted,
+                            if (ChannelChecker.verificando)
+                                "Verificando ${ChannelChecker.progreso} de ${ChannelChecker.total}..."
+                            else
+                                "${visible.size} canales  ·  ${playlist.channels.size} en total",
+                            color = if (ChannelChecker.verificando) Accent else TextMuted,
                             fontSize = 12.sp
                         )
                     }
-                    SearchField(query) { query = it }
+
+                    SmallButton(
+                        label = if (ChannelChecker.verificando) "Detener" else "Verificar",
+                        active = ChannelChecker.verificando
+                    ) {
+                        if (ChannelChecker.verificando) {
+                            verifyJob?.cancel()
+                        } else {
+                            val objetivo = visible.toList()
+                            verifyJob = lifecycleScope.launch {
+                                ChannelChecker.verificar(objetivo)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.width(8.dp))
+
+                    SmallButton(
+                        label = if (ocultarCaidos) "Mostrar todos" else "Ocultar caidos",
+                        active = ocultarCaidos
+                    ) { ocultarCaidos = !ocultarCaidos }
                 }
 
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(10.dp))
+                SearchField(query) { query = it }
+                Spacer(Modifier.height(12.dp))
 
                 if (visible.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            if (selectedGroup == FAVORITES)
-                                "Aun no tienes favoritos.\nManten pulsado un canal para marcarlo."
-                            else "Sin resultados.",
+                            when {
+                                selectedGroup == FAVORITES ->
+                                    "Aun no tienes favoritos.\nManten pulsado un canal para marcarlo."
+                                ocultarCaidos ->
+                                    "Todos los canales de esta categoria fallaron la verificacion."
+                                else -> "Sin resultados."
+                            },
                             color = TextMuted,
                             fontSize = 14.sp
                         )
@@ -168,6 +220,7 @@ class BrowseActivity : ComponentActivity() {
                             ChannelCard(
                                 channel = channel,
                                 isFavorite = channel.id in favorites,
+                                estado = ChannelChecker.statusOf(channel),
                                 onClick = { play(channel, visible) },
                                 onLongClick = {
                                     prefs.toggleFavorite(channel)
@@ -187,6 +240,23 @@ class BrowseActivity : ComponentActivity() {
             Intent(this, PlayerActivity::class.java)
                 .putExtra(PlayerActivity.EXTRA_INDEX, context.indexOf(channel).coerceAtLeast(0))
         )
+    }
+
+    @Composable
+    private fun SmallButton(label: String, active: Boolean, onClick: () -> Unit) {
+        FocusableCard(
+            onClick = onClick,
+            containerColor = if (active) Accent else Surface1,
+            focusedContainerColor = Accent
+        ) {
+            Text(
+                label,
+                color = Color.White,
+                fontSize = 12.5.sp,
+                maxLines = 1,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+            )
+        }
     }
 
     @Composable
@@ -234,6 +304,7 @@ class BrowseActivity : ComponentActivity() {
     private fun ChannelCard(
         channel: Channel,
         isFavorite: Boolean,
+        estado: ChannelStatus,
         onClick: () -> Unit,
         onLongClick: () -> Unit
     ) {
@@ -265,6 +336,24 @@ class BrowseActivity : ComponentActivity() {
                             fontWeight = FontWeight.Bold
                         )
                     }
+
+                    // Semaforo del verificador
+                    val colorEstado = when (estado) {
+                        ChannelStatus.OK -> Color(0xFF4CD07E)
+                        ChannelStatus.CAIDO -> Color(0xFFFF6B5E)
+                        ChannelStatus.PROBANDO -> Color(0xFFFFC93C)
+                        ChannelStatus.DESCONOCIDO -> null
+                    }
+                    if (colorEstado != null) {
+                        Box(
+                            Modifier
+                                .align(Alignment.TopStart)
+                                .padding(5.dp)
+                                .size(9.dp)
+                                .background(colorEstado, CircleShape)
+                        )
+                    }
+
                     if (isFavorite) {
                         Icon(
                             Icons.Default.Star,
@@ -280,7 +369,11 @@ class BrowseActivity : ComponentActivity() {
                 Spacer(Modifier.height(7.dp))
                 Text(
                     channel.name,
-                    color = if (active) Color.White else Color(0xFFD4D9E0),
+                    color = when {
+                        estado == ChannelStatus.CAIDO -> Color(0xFF7C848F)
+                        active -> Color.White
+                        else -> Color(0xFFD4D9E0)
+                    },
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 2,
@@ -297,7 +390,7 @@ class BrowseActivity : ComponentActivity() {
         val fieldFocus = remember { FocusRequester() }
         Box(
             Modifier
-                .width(220.dp)
+                .fillMaxWidth()
                 .background(if (focused) Surface2 else Surface1, RoundedCorner12)
                 .clickable { runCatching { fieldFocus.requestFocus() } }
                 .padding(horizontal = 14.dp, vertical = 11.dp)

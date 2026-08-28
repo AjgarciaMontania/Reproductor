@@ -97,6 +97,8 @@ class SourceActivity : ComponentActivity() {
                         loading = false
                         prefs.addRecentPlaylist(url)
                         recents = prefs.recentPlaylists()
+                        // Lista nueva: los resultados de verificacion anteriores ya no valen.
+                        ChannelChecker.reset()
                         PlaylistHolder.current = playlist
                         PlaylistHolder.sourceUrl = url
                         startActivity(Intent(this@SourceActivity, BrowseActivity::class.java))
