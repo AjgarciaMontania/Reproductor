@@ -10,9 +10,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
@@ -41,6 +43,7 @@ import com.alvaro.tvplayer.data.ChannelChecker
 import com.alvaro.tvplayer.data.ChannelStatus
 import com.alvaro.tvplayer.data.PlaylistHolder
 import com.alvaro.tvplayer.data.Prefs
+import com.alvaro.tvplayer.data.Search
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -81,21 +84,38 @@ class BrowseActivity : ComponentActivity() {
         }
         var selectedGroup by remember { mutableStateOf(playlist.groups.firstOrNull() ?: FAVORITES) }
 
-        // derivedStateOf (y no remember) porque lee el mapa de estados del
-        // verificador, que cambia mientras se comprueban los canales.
-        val visible by remember(selectedGroup, query, favorites, playlist, ocultarCaidos) {
+        val buscando = query.isNotBlank()
+        val consulta = remember(query) { Search.normalizar(query) }
+
+        // ---- Categorias cuyo nombre coincide con lo buscado ----
+        val categoriasCoincidentes = remember(consulta, playlist) {
+            if (consulta.isBlank()) emptyList()
+            else Search.ordenarPorRelevancia(
+                playlist.groups.filter { Search.coincide(it, consulta) },
+                consulta
+            ) { it }
+        }
+
+        // ---- Canales que se muestran ----
+        // derivedStateOf porque lee el mapa del verificador, que cambia en vivo.
+        val mostrados by remember(selectedGroup, consulta, favorites, playlist, ocultarCaidos) {
             derivedStateOf {
-                val base = when (selectedGroup) {
-                    FAVORITES -> playlist.channels.filter { it.id in favorites }
-                    else -> playlist.channels.filter { it.group == selectedGroup }
+                val base = if (consulta.isNotBlank()) {
+                    // BUSQUEDA GLOBAL: toda la lista, no solo la categoria abierta.
+                    Search.ordenarPorRelevancia(
+                        playlist.channels.filter { Search.coincide(it.name, consulta) },
+                        consulta
+                    ) { it.name }
+                } else {
+                    when (selectedGroup) {
+                        FAVORITES -> playlist.channels.filter { it.id in favorites }
+                        else -> playlist.channels.filter { it.group == selectedGroup }
+                    }
                 }
-                val buscados =
-                    if (query.isBlank()) base
-                    else base.filter { it.name.contains(query.trim(), ignoreCase = true) }
 
                 if (ocultarCaidos) {
-                    buscados.filter { ChannelChecker.statusOf(it) != ChannelStatus.CAIDO }
-                } else buscados
+                    base.filter { ChannelChecker.statusOf(it) != ChannelStatus.CAIDO }
+                } else base
             }
         }
 
@@ -132,8 +152,12 @@ class BrowseActivity : ComponentActivity() {
                         GroupItem(
                             label = group,
                             count = count,
-                            selected = group == selectedGroup,
-                            onClick = { selectedGroup = group },
+                            selected = !buscando && group == selectedGroup,
+                            resaltado = buscando && Search.coincide(group, consulta),
+                            onClick = {
+                                selectedGroup = group
+                                query = ""
+                            },
                             modifier = if (index == 0) Modifier.focusRequester(firstGroupFocus)
                                        else Modifier
                         )
@@ -148,11 +172,10 @@ class BrowseActivity : ComponentActivity() {
                     .fillMaxHeight()
                     .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
-                // Titulo + acciones
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            selectedGroup,
+                            if (buscando) "Resultados de \"$query\"" else selectedGroup,
                             color = Color.White,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
@@ -160,10 +183,16 @@ class BrowseActivity : ComponentActivity() {
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            if (ChannelChecker.verificando)
-                                "Verificando ${ChannelChecker.progreso} de ${ChannelChecker.total}..."
-                            else
-                                "${visible.size} canales  ·  ${playlist.channels.size} en total",
+                            when {
+                                ChannelChecker.verificando ->
+                                    "Verificando ${ChannelChecker.progreso} de ${ChannelChecker.total}..."
+                                buscando ->
+                                    "${mostrados.size} canales en toda la lista" +
+                                    if (categoriasCoincidentes.isNotEmpty())
+                                        "  ·  ${categoriasCoincidentes.size} categorias" else ""
+                                else ->
+                                    "${mostrados.size} canales  ·  ${playlist.channels.size} en total"
+                            },
                             color = if (ChannelChecker.verificando) Accent else TextMuted,
                             fontSize = 12.sp
                         )
@@ -176,7 +205,7 @@ class BrowseActivity : ComponentActivity() {
                         if (ChannelChecker.verificando) {
                             verifyJob?.cancel()
                         } else {
-                            val objetivo = visible.toList()
+                            val objetivo = mostrados.toList()
                             verifyJob = lifecycleScope.launch {
                                 ChannelChecker.verificar(objetivo)
                             }
@@ -192,13 +221,57 @@ class BrowseActivity : ComponentActivity() {
                 }
 
                 Spacer(Modifier.height(10.dp))
-                SearchField(query) { query = it }
+
+                SearchField(
+                    value = query,
+                    onValueChange = { query = it },
+                    onClear = { query = "" }
+                )
+
+                // ---- Categorias encontradas: atajo para saltar a una ----
+                if (buscando && categoriasCoincidentes.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Categorias que coinciden",
+                        color = TextMuted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(categoriasCoincidentes) { grupo ->
+                            val n = playlist.channels.count { it.group == grupo }
+                            FocusableCard(
+                                onClick = {
+                                    selectedGroup = grupo
+                                    query = ""
+                                },
+                                containerColor = Surface2,
+                                focusedContainerColor = Accent
+                            ) {
+                                Text(
+                                    "$grupo  ($n)",
+                                    color = Color.White,
+                                    fontSize = 12.5.sp,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(12.dp))
 
-                if (visible.isEmpty()) {
+                if (mostrados.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             when {
+                                buscando && categoriasCoincidentes.isNotEmpty() ->
+                                    "Ningun canal se llama asi, pero hay categorias que coinciden.\n" +
+                                    "Elige una de las de arriba."
+                                buscando ->
+                                    "No hay ningun canal con ese nombre en toda la lista.\n" +
+                                    "Prueba con menos letras."
                                 selectedGroup == FAVORITES ->
                                     "Aun no tienes favoritos.\nManten pulsado un canal para marcarlo."
                                 ocultarCaidos ->
@@ -216,12 +289,15 @@ class BrowseActivity : ComponentActivity() {
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(bottom = 20.dp)
                     ) {
-                        items(visible, key = { it.id }) { channel ->
+                        items(mostrados, key = { it.id }) { channel ->
                             ChannelCard(
                                 channel = channel,
                                 isFavorite = channel.id in favorites,
                                 estado = ChannelChecker.statusOf(channel),
-                                onClick = { play(channel, visible) },
+                                // En busqueda se muestra a que categoria pertenece,
+                                // que es justo lo que no se sabia de antemano.
+                                categoria = if (buscando) channel.group else null,
+                                onClick = { play(channel, mostrados) },
                                 onLongClick = {
                                     prefs.toggleFavorite(channel)
                                     favorites = prefs.favorites()
@@ -264,13 +340,18 @@ class BrowseActivity : ComponentActivity() {
         label: String,
         count: Int,
         selected: Boolean,
+        resaltado: Boolean,
         onClick: () -> Unit,
         modifier: Modifier = Modifier
     ) {
         FocusableCard(
             onClick = onClick,
             modifier = modifier.fillMaxWidth(),
-            containerColor = if (selected) Surface2 else Color.Transparent,
+            containerColor = when {
+                selected -> Surface2
+                resaltado -> Color(0xFF1B2E4D)   // coincide con la busqueda
+                else -> Color.Transparent
+            },
             focusedContainerColor = Accent
         ) { active ->
             Row(
@@ -283,7 +364,7 @@ class BrowseActivity : ComponentActivity() {
                     label,
                     color = when {
                         active -> Color.White
-                        selected -> Accent
+                        selected || resaltado -> Accent
                         else -> TextMuted
                     },
                     fontSize = 14.sp,
@@ -305,6 +386,7 @@ class BrowseActivity : ComponentActivity() {
         channel: Channel,
         isFavorite: Boolean,
         estado: ChannelStatus,
+        categoria: String?,
         onClick: () -> Unit,
         onLongClick: () -> Unit
     ) {
@@ -337,7 +419,6 @@ class BrowseActivity : ComponentActivity() {
                         )
                     }
 
-                    // Semaforo del verificador
                     val colorEstado = when (estado) {
                         ChannelStatus.OK -> Color(0xFF4CD07E)
                         ChannelStatus.CAIDO -> Color(0xFFFF6B5E)
@@ -366,7 +447,9 @@ class BrowseActivity : ComponentActivity() {
                         )
                     }
                 }
+
                 Spacer(Modifier.height(7.dp))
+
                 Text(
                     channel.name,
                     color = when {
@@ -376,39 +459,76 @@ class BrowseActivity : ComponentActivity() {
                     },
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.Medium,
-                    maxLines = 2,
+                    maxLines = if (categoria == null) 2 else 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.height(32.dp)
+                    modifier = Modifier.height(if (categoria == null) 32.dp else 17.dp)
                 )
+
+                // En modo busqueda: a que categoria pertenece este canal
+                if (categoria != null) {
+                    Text(
+                        categoria,
+                        color = if (active) Accent else TextMuted,
+                        fontSize = 10.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.height(15.dp)
+                    )
+                }
             }
         }
     }
 
     @Composable
-    private fun SearchField(value: String, onValueChange: (String) -> Unit) {
+    private fun SearchField(
+        value: String,
+        onValueChange: (String) -> Unit,
+        onClear: () -> Unit
+    ) {
         var focused by remember { mutableStateOf(false) }
         val fieldFocus = remember { FocusRequester() }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .background(if (focused) Surface2 else Surface1, RoundedCorner12)
-                .clickable { runCatching { fieldFocus.requestFocus() } }
-                .padding(horizontal = 14.dp, vertical = 11.dp)
-        ) {
-            if (value.isEmpty()) {
-                Text("Buscar canal...", color = TextMuted, fontSize = 13.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .background(if (focused) Surface2 else Surface1, RoundedCorner12)
+                    .clickable { runCatching { fieldFocus.requestFocus() } }
+                    .padding(horizontal = 14.dp, vertical = 11.dp)
+            ) {
+                if (value.isEmpty()) {
+                    Text(
+                        "Buscar en TODA la lista: canal o categoria...",
+                        color = TextMuted,
+                        fontSize = 13.sp
+                    )
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                    cursorBrush = SolidColor(Accent),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(fieldFocus)
+                        .onFocusChanged { focused = it.isFocused }
+                )
             }
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                singleLine = true,
-                textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
-                cursorBrush = SolidColor(Accent),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(fieldFocus)
-                    .onFocusChanged { focused = it.isFocused }
-            )
+            if (value.isNotEmpty()) {
+                Spacer(Modifier.width(8.dp))
+                FocusableCard(
+                    onClick = onClear,
+                    containerColor = Surface1,
+                    focusedContainerColor = Accent
+                ) {
+                    Text(
+                        "Limpiar",
+                        color = Color.White,
+                        fontSize = 12.5.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
+                    )
+                }
+            }
         }
     }
 }
