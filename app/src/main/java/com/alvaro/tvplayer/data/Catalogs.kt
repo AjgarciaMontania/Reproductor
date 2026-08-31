@@ -78,8 +78,8 @@ object Catalogs {
         // Entra en la fusion inicial, asi que aparece como una categoria mas
         // dentro de TV EN VIVO, no como un catalogo aparte que haya que cargar.
         Catalog(
-            "Adultos +18",
-            "Categoria xxx de iptv-org",
+            "XXX  ·  Adultos +18",
+            "Categoria xxx de iptv-org, contenido para adultos",
             "$IPTV_ORG/categories/xxx.m3u"
         )
     )

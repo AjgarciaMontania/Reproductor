@@ -1330,8 +1330,13 @@ class HomeActivity : ComponentActivity() {
                 item { Text("Consultando catalogos...", color = Accent, fontSize = 11.sp) }
             } else {
                 val q = Search.normalizar(filtro)
+                // Se busca tambien en la descripcion: el catalogo de adultos se
+                // titula "XXX · Adultos +18" pero alguien puede escribir "adulto",
+                // y al reves. Buscar solo en el titulo dejaba fuera coincidencias.
                 val visibles = if (q.isBlank()) catalogosApi
-                               else catalogosApi.filter { Search.coincide(it.title, q) }
+                               else catalogosApi.filter {
+                                   Search.coincide(it.title, q) || Search.coincide(it.subtitle, q)
+                               }
 
                 if (visibles.isEmpty()) {
                     item {
