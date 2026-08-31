@@ -56,10 +56,37 @@ jobs:
           echo "notes=${NOTES}"      >> "$GITHUB_OUTPUT"
           echo "tag=v${NAME}"        >> "$GITHUB_OUTPUT"
 
+      - name: Comprobar que estan los cuatro secrets
+        env:
+          KB: ${{ secrets.KEYSTORE_BASE64 }}
+          KP: ${{ secrets.KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.KEY_ALIAS }}
+          KK: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          faltan=""
+          if [ -z "$KB" ]; then faltan="$faltan KEYSTORE_BASE64"; fi
+          if [ -z "$KP" ]; then faltan="$faltan KEYSTORE_PASSWORD"; fi
+          if [ -z "$KA" ]; then faltan="$faltan KEY_ALIAS"; fi
+          if [ -z "$KK" ]; then faltan="$faltan KEY_PASSWORD"; fi
+          if [ -n "$faltan" ]; then
+            echo "::error::Faltan estos secrets del repositorio:$faltan"
+            echo "Creense en Settings > Secrets and variables > Actions."
+            echo "Sin ellos el APK sale SIN FIRMAR y no sirve como actualizacion."
+            exit 1
+          fi
+          echo "Los cuatro secrets estan presentes."
+
       - name: Restaurar el keystore desde el secret
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/mi-tv.jks"
-          echo "Keystore restaurado ($(stat -c%s "$RUNNER_TEMP/mi-tv.jks") bytes)"
+          TAM=$(stat -c%s "$RUNNER_TEMP/mi-tv.jks")
+          echo "Keystore restaurado ($TAM bytes)"
+          if [ "$TAM" -lt 1000 ]; then
+            echo "::error::El keystore restaurado es demasiado pequeño ($TAM bytes)."
+            echo "KEYSTORE_BASE64 seguramente esta incompleto: debe ser el contenido"
+            echo "integro de keystore_base64.txt, en una sola linea."
+            exit 1
+          fi
 
       - name: Compilar APK firmado
         env:
@@ -74,8 +101,18 @@ jobs:
       - name: Preparar artefactos
         id: art
         run: |
-          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
-          if [ -z "$APK" ]; then echo "No se genero ningun APK"; exit 1; fi
+          echo "APKs generados:"
+          find app/build/outputs/apk/release -name "*.apk" -printf "  %f\n" || true
+
+          # Se descartan explicitamente los *-unsigned.apk: un APK sin firmar
+          # no sirve como actualizacion y antes se colaba sin avisar.
+          APK=$(find app/build/outputs/apk/release -name "*.apk" ! -name "*unsigned*" | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::Solo se genero un APK SIN FIRMAR."
+            echo "Gradle no aplico la firma, asi que los secrets no llegaron al build."
+            exit 1
+          fi
+          echo "Usando: $APK"
           DEST="MiReproductorTV-${{ steps.v.outputs.tag }}.apk"
           cp "$APK" "$DEST"
           echo "apk=${DEST}" >> "$GITHUB_OUTPUT"

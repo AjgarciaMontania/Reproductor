@@ -62,6 +62,12 @@ android {
                 storePassword = ksPassword
                 keyAlias = ksAlias
                 keyPassword = ksKeyPassword
+                // minSdk es 23, y por debajo de API 24 Android exige la firma v1
+                // (la del META-INF/MANIFEST.MF). Sin ella apksigner no valida el
+                // APK y los dispositivos antiguos lo rechazan.
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
