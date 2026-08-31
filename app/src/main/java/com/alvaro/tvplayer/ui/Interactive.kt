@@ -12,8 +12,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.dp
+
+/**
+ * Esquina redondeada estandar de la interfaz.
+ *
+ * Vivia en SourceActivity.kt; al eliminar esa pantalla el simbolo desaparecio
+ * y rompio la compilacion. Ahora vive aqui, junto al componente que lo usa
+ * como valor por defecto.
+ */
+val RoundedCorner12: Shape = RoundedCornerShape(12.dp)
 
 /**
  * Elemento pulsable que funciona con CUALQUIER entrada:
