@@ -247,6 +247,13 @@ class HomeActivity : ComponentActivity() {
         var selectorAudio by remember { mutableStateOf(false) }
         var progresoPeli by remember { mutableStateOf(0f) }
 
+        // Explorador de catalogos servido por la API de iptv-org
+        var catCategorias by remember { mutableStateOf<List<Catalog>>(emptyList()) }
+        var catPaises by remember { mutableStateOf<List<Catalog>>(emptyList()) }
+        var cargandoApi by remember { mutableStateOf(false) }
+        var pestanaCat by remember { mutableIntStateOf(0) }
+        var filtroCat by remember { mutableStateOf("") }
+
         var coleccion by remember { mutableStateOf(ArchiveMovies.colecciones.first().id) }
         var peliculas by remember { mutableStateOf<List<Movie>>(emptyList()) }
         var paginaPelis by remember { mutableIntStateOf(1) }
@@ -419,6 +426,16 @@ class HomeActivity : ComponentActivity() {
                 playlist.channels.firstOrNull { !ChannelChecker.estaCaido(it) }?.let { verCanal(it) }
             }
         }
+        // Al entrar en LISTAS se traen los indices completos de la API.
+        LaunchedEffect(seccion) {
+            if (seccion == Seccion.LISTAS && catCategorias.isEmpty() && !cargandoApi) {
+                cargandoApi = true
+                catCategorias = IptvOrgApi.categorias()
+                catPaises = IptvOrgApi.paises()
+                cargandoApi = false
+            }
+        }
+
         LaunchedEffect(seccion, coleccion) {
             if (seccion == Seccion.PELICULAS && peliculas.isEmpty()) {
                 cargandoPelis = true; paginaPelis = 1
@@ -602,6 +619,12 @@ class HomeActivity : ComponentActivity() {
                                 Seccion.LISTAS -> PanelListas(
                                     totalCanales = playlist.channels.size,
                                     categorias = playlist.groups.size,
+                                    catalogosApi = if (pestanaCat == 0) catCategorias else catPaises,
+                                    cargandoApi = cargandoApi,
+                                    pestana = pestanaCat,
+                                    onPestana = { pestanaCat = it },
+                                    filtro = filtroCat,
+                                    onFiltro = { filtroCat = it },
                                     versionNombre = versionNombre,
                                     versionCodigo = versionCodigo,
                                     diagnosticoFirma = AppSignature.diagnostico(actividad),
@@ -1118,6 +1141,9 @@ class HomeActivity : ComponentActivity() {
     @Composable
     private fun PanelListas(
         totalCanales: Int, categorias: Int,
+        catalogosApi: List<Catalog>, cargandoApi: Boolean,
+        pestana: Int, onPestana: (Int) -> Unit,
+        filtro: String, onFiltro: (String) -> Unit,
         versionNombre: String, versionCodigo: Int,
         diagnosticoFirma: String, firmaOk: Boolean,
         update: UpdateInfo?, updateMsg: String?, progreso: Int,
@@ -1139,8 +1165,73 @@ class HomeActivity : ComponentActivity() {
                 Boton("Recargar todos los catalogos", onRecargar)
             }
 
+            // ---- explorador: todas las categorias y paises publicados ----
             item {
+                Spacer(Modifier.height(8.dp))
+                Text("Explorar catalogos", color = Color.White, fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold)
+                Text("Listas publicadas por iptv-org, al dia", color = TextMuted, fontSize = 9.5.sp)
                 Spacer(Modifier.height(6.dp))
+
+                Row {
+                    listOf("Categorias", "Paises").forEachIndexed { i, etiqueta ->
+                        FocusableCard(
+                            onClick = { onPestana(i) },
+                            containerColor = if (pestana == i) Accent else Color(0x33FFFFFF),
+                            focusedContainerColor = Accent,
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Text(etiqueta, color = Color.White, fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp))
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                CampoTexto(filtro, onFiltro, "Filtrar...")
+                Spacer(Modifier.height(6.dp))
+            }
+
+            if (cargandoApi) {
+                item { Text("Consultando catalogos...", color = Accent, fontSize = 11.sp) }
+            } else {
+                val q = Search.normalizar(filtro)
+                val visibles = if (q.isBlank()) catalogosApi
+                               else catalogosApi.filter { Search.coincide(it.title, q) }
+
+                if (visibles.isEmpty()) {
+                    item {
+                        Text("Sin resultados.", color = TextMuted, fontSize = 11.sp)
+                    }
+                } else {
+                    item {
+                        Text("${visibles.size} disponibles", color = TextMuted, fontSize = 9.5.sp)
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    items(visibles) { c ->
+                        FocusableCard(
+                            onClick = { onCargarUrl(c.url) },
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = Color(0x26FFFFFF),
+                            focusedContainerColor = Accent,
+                            shape = RoundedCornerShape(8.dp)
+                        ) { enf ->
+                            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                Text(c.title,
+                                    color = if (enf) Color.White else Color(0xFFDCE1E7),
+                                    fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(c.subtitle,
+                                    color = if (enf) Color.White else TextMuted,
+                                    fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(10.dp))
                 Text("Tu propia lista M3U", color = Color.White, fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(5.dp))
