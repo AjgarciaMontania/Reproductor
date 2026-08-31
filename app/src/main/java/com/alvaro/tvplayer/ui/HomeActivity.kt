@@ -577,19 +577,32 @@ class HomeActivity : ComponentActivity() {
 
                     BarraSuperior(playlist.channels.size, recargando)
 
-                    Row(Modifier.weight(1f).fillMaxWidth()) {
+                    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                    // En pantallas estrechas (celular en vertical) no caben el
+                    // menu ancho y el panel a la vez: el menu se reduce a iconos
+                    // y el panel ocupa el resto. En TV se ve completo.
+                    val estrecho = maxWidth < 620.dp
+                    val anchoMenu = if (estrecho) 62.dp else 225.dp
+
+                    Row(Modifier.fillMaxSize()) {
                         Column(
-                            Modifier.width(225.dp).fillMaxHeight().padding(start = 20.dp, top = 6.dp),
+                            Modifier.width(anchoMenu).fillMaxHeight()
+                                .padding(start = if (estrecho) 6.dp else 20.dp, top = 6.dp),
                             verticalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
                             Seccion.entries.forEach { s ->
-                                ItemMenu(s, s == seccion) { seccion = s }
+                                ItemMenu(s, s == seccion, soloIcono = estrecho) { seccion = s }
                             }
                         }
 
-                        Spacer(Modifier.weight(1f))
+                        if (!estrecho) Spacer(Modifier.weight(1f))
 
-                        Column(Modifier.width(335.dp).fillMaxHeight().padding(end = 16.dp, top = 2.dp)) {
+                        Column(
+                            if (estrecho) Modifier.weight(1f).fillMaxHeight()
+                                .padding(start = 8.dp, end = 8.dp, top = 2.dp)
+                            else Modifier.width(335.dp).fillMaxHeight()
+                                .padding(end = 16.dp, top = 2.dp)
+                        ) {
                             when (seccion) {
                                 Seccion.PELICULAS -> PanelPeliculas(
                                     peliculas, cargandoPelis, coleccion,
@@ -682,6 +695,7 @@ class HomeActivity : ComponentActivity() {
                                 )
                             }
                         }
+                    }
                     }
 
                     BarraInferior(tituloActual, estado, cargando,
@@ -903,7 +917,12 @@ class HomeActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun ItemMenu(seccion: Seccion, activa: Boolean, onClick: () -> Unit) {
+    private fun ItemMenu(
+        seccion: Seccion,
+        activa: Boolean,
+        soloIcono: Boolean = false,
+        onClick: () -> Unit
+    ) {
         FocusableCard(
             onClick = onClick,
             modifier = Modifier.fillMaxWidth(),
@@ -912,17 +931,22 @@ class HomeActivity : ComponentActivity() {
             shape = RoundedCornerShape(7.dp)
         ) { enfocado ->
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp),
-                verticalAlignment = Alignment.CenterVertically
+                Modifier.fillMaxWidth()
+                    .padding(horizontal = if (soloIcono) 8.dp else 13.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (soloIcono) Arrangement.Center else Arrangement.Start
             ) {
                 Icon(seccion.icono, null,
                     tint = if (activa || enfocado) Color.White else TextMuted,
-                    modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(10.dp))
-                Text(seccion.etiqueta,
-                    color = if (activa || enfocado) Color.White else Color(0xFFC3CAD3),
-                    fontSize = 13.sp,
-                    fontWeight = if (activa) FontWeight.Bold else FontWeight.Medium, maxLines = 1)
+                    modifier = Modifier.size(if (soloIcono) 20.dp else 17.dp))
+                if (!soloIcono) {
+                    Spacer(Modifier.width(10.dp))
+                    Text(seccion.etiqueta,
+                        color = if (activa || enfocado) Color.White else Color(0xFFC3CAD3),
+                        fontSize = 13.sp,
+                        fontWeight = if (activa) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1)
+                }
             }
         }
     }
@@ -1244,7 +1268,15 @@ class HomeActivity : ComponentActivity() {
                 }
 
                 Spacer(Modifier.height(6.dp))
-                CampoTexto(filtro, onFiltro, "Filtrar...")
+                // El texto del campo dice cuantos hay y que se busca en cada pestaña
+                CampoTexto(
+                    filtro, onFiltro,
+                    when (pestana) {
+                        0 -> "Filtrar entre ${catalogosApi.size} listas..."
+                        1 -> "Escribe una categoria (${catalogosApi.size})..."
+                        else -> "Escribe un pais (${catalogosApi.size})..."
+                    }
+                )
                 Spacer(Modifier.height(6.dp))
             }
 
