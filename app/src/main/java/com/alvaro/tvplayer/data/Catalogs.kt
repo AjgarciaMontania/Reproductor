@@ -41,6 +41,11 @@ object Catalogs {
             "$IPTV_ORG/categories/news.m3u"
         ),
         Catalog(
+            "Deportes",
+            "Canales deportivos de emision abierta",
+            "$IPTV_ORG/categories/sports.m3u"
+        ),
+        Catalog(
             "Infantil",
             "Canales para niños",
             "$IPTV_ORG/categories/kids.m3u"

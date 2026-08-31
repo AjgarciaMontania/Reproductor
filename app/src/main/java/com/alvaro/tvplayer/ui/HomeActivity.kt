@@ -43,9 +43,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -238,6 +240,13 @@ class HomeActivity : ComponentActivity() {
         var buscadorFs by remember { mutableStateOf(false) }
         var consultaFs by remember { mutableStateOf("") }
 
+        // Solo las peliculas guardan progreso; la TV en vivo no tiene sentido.
+        var peliculaActual by remember { mutableStateOf<Movie?>(null) }
+        var idiomasAudio by remember { mutableStateOf<List<String>>(emptyList()) }
+        var idiomaElegido by remember { mutableStateOf<String?>(null) }
+        var selectorAudio by remember { mutableStateOf(false) }
+        var progresoPeli by remember { mutableStateOf(0f) }
+
         var coleccion by remember { mutableStateOf(ArchiveMovies.colecciones.first().id) }
         var peliculas by remember { mutableStateOf<List<Movie>>(emptyList()) }
         var paginaPelis by remember { mutableIntStateOf(1) }
@@ -275,6 +284,20 @@ class HomeActivity : ComponentActivity() {
                         canalActual?.let { ChannelChecker.marcarOk(it) }
                     }
                 }
+
+                // Idiomas de audio disponibles en lo que se esta reproduciendo.
+                override fun onTracksChanged(tracks: Tracks) {
+                    val langs = tracks.groups
+                        .filter { it.type == C.TRACK_TYPE_AUDIO }
+                        .flatMap { g ->
+                            (0 until g.length).mapNotNull { i ->
+                                g.getTrackFormat(i).language
+                            }
+                        }
+                        .filter { it.isNotBlank() && it != "und" }
+                        .distinct()
+                    idiomasAudio = langs
+                }
             }
             exo.addListener(l)
             val receptor = UpdateInstaller.registerStatusReceiver(actividad) {
@@ -286,8 +309,9 @@ class HomeActivity : ComponentActivity() {
             }
         }
 
-        fun reproducir(url: String, cabeceras: Map<String, String>) {
+        fun reproducir(url: String, cabeceras: Map<String, String>, desde: Long = 0L) {
             estado = null; cargando = true
+            idiomasAudio = emptyList()
             val http = DefaultHttpDataSource.Factory()
                 .setUserAgent(cabeceras["User-Agent"] ?: "MiReproductorTV/1.0")
                 .setAllowCrossProtocolRedirects(true)
@@ -301,13 +325,15 @@ class HomeActivity : ComponentActivity() {
                     .createMediaSource(MediaItem.fromUri(url))
             )
             exo.prepare()
+            if (desde > 0L) exo.seekTo(desde)
         }
 
         fun verCanal(c: Channel, contexto: List<Channel> = emptyList()) {
             // El contexto es la lista por la que se movera el zapping: la
             // categoria desde la que se eligio el canal.
             if (contexto.isNotEmpty()) cola = contexto
-            canalActual = c; tituloActual = c.name
+            canalActual = c; peliculaActual = null; progresoPeli = 0f
+            tituloActual = c.name
             prefs.addRecentChannel(c)
             reproducir(c.url, c.headers)
         }
@@ -325,12 +351,24 @@ class HomeActivity : ComponentActivity() {
         }
 
         fun verPelicula(p: Movie) {
-            canalActual = null; tituloActual = p.title
+            canalActual = null; peliculaActual = p
+            tituloActual = p.title
             estado = "Buscando el video..."; cargando = true
             lifecycleScope.launch {
                 val url = ArchiveMovies.urlDeVideo(p.identifier)
-                if (url == null) { cargando = false; estado = "Sin video reproducible." }
-                else reproducir(url, emptyMap())
+                if (url == null) {
+                    cargando = false
+                    estado = "Sin video reproducible."
+                } else {
+                    // Se retoma donde se dejo, salvo que apenas se hubiera empezado
+                    // o que ya estuviera practicamente terminada.
+                    val desde = prefs.posicionParaReanudar(p.identifier)
+                    if (desde > 0L) {
+                        val min = desde / 60000
+                        estado = "Reanudando en el minuto $min..."
+                    }
+                    reproducir(url, emptyMap(), desde)
+                }
             }
         }
 
@@ -387,6 +425,35 @@ class HomeActivity : ComponentActivity() {
                 peliculas = runCatching { ArchiveMovies.listar(coleccion, 1) }.getOrDefault(emptyList())
                 cargandoPelis = false
             }
+        }
+
+        // Guarda el avance de la pelicula cada pocos segundos. Solo VOD:
+        // en una emision en directo la posicion no significa nada.
+        LaunchedEffect(peliculaActual) {
+            val p = peliculaActual ?: return@LaunchedEffect
+            while (true) {
+                delay(5000)
+                val dur = exo.duration
+                val pos = exo.currentPosition
+                if (dur > 0L && pos > 0L) {
+                    prefs.guardarProgreso(p.identifier, pos, dur)
+                    progresoPeli = (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+                }
+            }
+        }
+
+        // Si la pelicula trae audio en español, se elige solo.
+        LaunchedEffect(idiomasAudio) {
+            if (idiomaElegido == null) {
+                idiomasAudio.firstOrNull { it.lowercase().startsWith("es") }
+                    ?.let { idiomaElegido = it }
+            }
+        }
+        LaunchedEffect(idiomaElegido) {
+            val l = idiomaElegido ?: return@LaunchedEffect
+            exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                .setPreferredAudioLanguage(l)
+                .build()
         }
 
         // Los controles se ocultan solos para no tapar el video.
@@ -517,7 +584,8 @@ class HomeActivity : ComponentActivity() {
                                                 cargandoPelis = false
                                             }
                                         }
-                                    }
+                                    },
+                                    { prefs.fraccionVista(it.identifier) }
                                 )
 
                                 Seccion.EXPLORAR -> PanelExplorar(
@@ -639,10 +707,55 @@ class HomeActivity : ComponentActivity() {
                             BotonControl(Icons.Filled.Search, "Buscar") {
                                 buscadorFs = true; consultaFs = ""
                             }
+                            if (idiomasAudio.size > 1) {
+                                Spacer(Modifier.width(9.dp))
+                                BotonControl(Icons.Filled.Language, "Audio") {
+                                    selectorAudio = !selectorAudio
+                                }
+                            }
                             Spacer(Modifier.width(9.dp))
                             BotonControl(Icons.Filled.Menu, "Menu") {
                                 menuVisible = true; controles = false
                             }
+                        }
+
+                        // ---- idiomas de audio disponibles ----
+                        if (selectorAudio && idiomasAudio.isNotEmpty()) {
+                            Spacer(Modifier.height(11.dp))
+                            Text("Idioma del audio", color = TextMuted, fontSize = 10.5.sp)
+                            Spacer(Modifier.height(5.dp))
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(idiomasAudio) { l ->
+                                    FocusableCard(
+                                        onClick = { idiomaElegido = l; selectorAudio = false },
+                                        containerColor = if (l == idiomaElegido) Accent
+                                                         else Color(0x33FFFFFF),
+                                        focusedContainerColor = Accent,
+                                        shape = RoundedCornerShape(20.dp)
+                                    ) {
+                                        Text(nombreIdioma(l), color = Color.White, fontSize = 11.sp,
+                                            modifier = Modifier.padding(
+                                                horizontal = 13.dp, vertical = 7.dp))
+                                    }
+                                }
+                            }
+                        }
+
+                        // ---- barra de avance, solo en peliculas ----
+                        if (peliculaActual != null && progresoPeli > 0f) {
+                            Spacer(Modifier.height(11.dp))
+                            Box(
+                                Modifier.fillMaxWidth().height(4.dp)
+                                    .background(Color(0x40FFFFFF), RoundedCornerShape(2.dp))
+                            ) {
+                                Box(
+                                    Modifier.fillMaxWidth(progresoPeli).height(4.dp)
+                                        .background(Accent, RoundedCornerShape(2.dp))
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text("${(progresoPeli * 100).toInt()}% visto",
+                                color = TextMuted, fontSize = 10.sp)
                         }
                     }
                 }
@@ -862,7 +975,8 @@ class HomeActivity : ComponentActivity() {
     @Composable
     private fun PanelPeliculas(
         peliculas: List<Movie>, cargando: Boolean, coleccionActual: String,
-        onColeccion: (String) -> Unit, onVer: (Movie) -> Unit, onMas: () -> Unit
+        onColeccion: (String) -> Unit, onVer: (Movie) -> Unit, onMas: () -> Unit,
+        progresoDe: (Movie) -> Float
     ) {
         Column {
             Text("Peliculas de dominio publico", color = Color.White,
@@ -909,6 +1023,25 @@ class HomeActivity : ComponentActivity() {
                                         fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
                                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     p.year?.let { Text(it, color = TextMuted, fontSize = 9.5.sp) }
+
+                                    // Avance de lo ya visto
+                                    val frac = progresoDe(p)
+                                    if (frac > 0.01f) {
+                                        Spacer(Modifier.height(4.dp))
+                                        Box(
+                                            Modifier.fillMaxWidth().height(3.dp)
+                                                .background(Color(0x40FFFFFF), RoundedCornerShape(2.dp))
+                                        ) {
+                                            Box(
+                                                Modifier.fillMaxWidth(frac).height(3.dp)
+                                                    .background(Accent, RoundedCornerShape(2.dp))
+                                            )
+                                        }
+                                        Text(
+                                            if (frac > 0.95f) "Vista" else "${(frac * 100).toInt()}% visto",
+                                            color = Accent, fontSize = 8.5.sp
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1074,6 +1207,20 @@ class HomeActivity : ComponentActivity() {
                 Spacer(Modifier.height(14.dp))
             }
         }
+    }
+
+    /** Codigo ISO de idioma a nombre legible. */
+    private fun nombreIdioma(codigo: String): String = when (codigo.lowercase().take(2)) {
+        "es" -> "Español"
+        "en" -> "Ingles"
+        "pt" -> "Portugues"
+        "fr" -> "Frances"
+        "it" -> "Italiano"
+        "de" -> "Aleman"
+        "ja" -> "Japones"
+        "ru" -> "Ruso"
+        "zh" -> "Chino"
+        else -> codigo.uppercase()
     }
 
     /** Boton redondo de los controles sobre el video. */

@@ -81,6 +81,45 @@ class Prefs(context: Context) {
 
     fun hashDe(id: String) = clave(id)
 
+    // --- Progreso de peliculas y series (no aplica a TV en vivo) ---
+
+    /** Guarda por donde va una pelicula. Se ignora si aun no hay duracion. */
+    fun guardarProgreso(id: String, posicionMs: Long, duracionMs: Long) {
+        if (duracionMs <= 0L || posicionMs < 0L) return
+        sp.edit().putString("$KEY_PROG${clave(id)}", "$posicionMs|$duracionMs").apply()
+    }
+
+    /** Devuelve (posicion, duracion) en milisegundos, o null si nunca se vio. */
+    fun progreso(id: String): Pair<Long, Long>? {
+        val bruto = sp.getString("$KEY_PROG${clave(id)}", null) ?: return null
+        val partes = bruto.split("|")
+        if (partes.size != 2) return null
+        val pos = partes[0].toLongOrNull() ?: return null
+        val dur = partes[1].toLongOrNull() ?: return null
+        return if (dur > 0) pos to dur else null
+    }
+
+    /** Fraccion vista, de 0 a 1. Cero si no hay registro. */
+    fun fraccionVista(id: String): Float {
+        val (pos, dur) = progreso(id) ?: return 0f
+        return (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Posicion desde la que reanudar. Se descarta el principio (menos de 30 s,
+     * no merece la pena) y el final (mas del 95%, ya se termino de ver).
+     */
+    fun posicionParaReanudar(id: String): Long {
+        val (pos, dur) = progreso(id) ?: return 0L
+        if (pos < 30_000L) return 0L
+        if (pos > dur * 0.95) return 0L
+        return pos
+    }
+
+    fun olvidarProgreso(id: String) {
+        sp.edit().remove("$KEY_PROG${clave(id)}").apply()
+    }
+
     private companion object {
         const val KEY_FAVS = "favorites"
         const val KEY_RECENT = "recent_playlists"
@@ -89,5 +128,6 @@ class Prefs(context: Context) {
         const val KEY_OK = "ok_"
         const val KEY_DEAD = "dead_"
         const val KEY_CHECKED = "checked_"
+        const val KEY_PROG = "prog_"
     }
 }
