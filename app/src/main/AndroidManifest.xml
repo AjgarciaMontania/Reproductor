@@ -29,9 +29,14 @@
           Orientacion libre en las pantallas de navegacion: en el televisor siempre
           es horizontal, y asi tambien se puede probar comodamente en un celular.
         -->
+        <!--
+          Pantalla unica y punto de entrada: carga todos los catalogos al abrir
+          y muestra el video de fondo con el menu superpuesto.
+        -->
         <activity
-            android:name=".ui.SourceActivity"
+            android:name=".ui.HomeActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -39,17 +44,6 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!--
-          Pantalla principal: video de fondo con el menu superpuesto.
-          Horizontal fija, porque el video ocupa toda la pantalla.
-        -->
-        <activity
-            android:name=".ui.HomeActivity"
-            android:exported="false"
-            android:screenOrientation="landscape"
-            android:launchMode="singleTask"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode" />
 
     </application>
 </manifest>

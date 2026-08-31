@@ -53,6 +53,15 @@ android {
         // Datos del repositorio de donde se bajan las actualizaciones.
         buildConfigField("String", "UPDATE_OWNER", "\"AjgarciaMontania\"")
         buildConfigField("String", "UPDATE_REPO", "\"Reproductor\"")
+
+        // Huella SHA-256 del keystore propio (mi-tv.jks, alias mitv).
+        // La app la compara con la suya para avisar si se instalo el APK
+        // de depuracion en vez del firmado, que es lo que provoca el error
+        // "signatures do not match" al actualizar.
+        buildConfigField(
+            "String", "FIRMA_ESPERADA",
+            "\"7DD98B59CAD12B69A8993C6ACBCCBE810C9A60EC67570306DB3EBA21215D0494\""
+        )
     }
 
     signingConfigs {
