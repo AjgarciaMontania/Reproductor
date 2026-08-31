@@ -181,13 +181,27 @@ class HomeActivity : ComponentActivity() {
                         }
                         val añadidos = fusionada.channels.size - (actual?.channels?.size ?: 0)
 
+                        // Que categorias aparecieron: sin esto se añadian canales
+                        // pero no habia forma de saber donde habian caido ni como
+                        // se llamaban, y encontrarlos era imposible.
+                        val gruposAntes = actual?.groups?.toSet() ?: emptySet()
+                        val nuevasCats = fusionada.groups.filterNot { it in gruposAntes }
+
                         PlaylistHolder.current = fusionada
                         playlist = fusionada
-                        aviso = if (añadidos > 0)
-                            "Añadidos $añadidos canales. Ahora tienes " +
-                            "${fusionada.channels.size} en ${fusionada.groups.size} categorias."
-                        else
-                            "Esa lista no aporta canales nuevos: ya los tenias todos."
+
+                        aviso = when {
+                            añadidos <= 0 ->
+                                "Esa lista no aporta canales nuevos: ya los tenias todos."
+                            nuevasCats.isEmpty() ->
+                                "Añadidos $añadidos canales, repartidos en categorias " +
+                                "que ya tenias. Total: ${fusionada.channels.size}."
+                            else ->
+                                "Añadidos $añadidos canales en ${nuevasCats.size} categorias " +
+                                "nuevas: ${nuevasCats.take(8).joinToString(", ")}" +
+                                (if (nuevasCats.size > 8) "..." else "") +
+                                ". Total: ${fusionada.channels.size}."
+                        }
                         alTerminar()
                     }
                     .onFailure {
