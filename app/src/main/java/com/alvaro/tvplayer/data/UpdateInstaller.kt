@@ -128,6 +128,31 @@ object UpdateInstaller {
             Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)
         }
 
+    /** Traduce los fallos del instalador de Android a algo accionable. */
+    fun explicarFallo(mensaje: String?): String {
+        val m = mensaje.orEmpty()
+        return when {
+            m.contains("UPDATE_INCOMPATIBLE") || m.contains("signatures do not match") ->
+                "Esta version esta firmada con una llave distinta a la de la app instalada, " +
+                "y Android no permite reemplazarla.\n" +
+                "Desinstala la app UNA sola vez e instala este APK a mano. " +
+                "A partir de ahi las actualizaciones entraran solas, sin desinstalar nada."
+
+            m.contains("INSUFFICIENT_STORAGE") ->
+                "No hay espacio suficiente en el dispositivo para instalar la actualizacion."
+
+            m.contains("ABORTED") ->
+                "Instalacion cancelada."
+
+            m.contains("INVALID_APK") || m.contains("PARSE") ->
+                "El archivo descargado no es un APK valido. Se reintentara en la proxima comprobacion."
+
+            m.isBlank() -> "No se pudo instalar la actualizacion."
+
+            else -> "No se pudo instalar: $m"
+        }
+    }
+
     /**
      * Escucha el resultado de la instalacion. Si el sistema pide confirmacion,
      * reenvia la pantalla correspondiente.
@@ -146,7 +171,7 @@ object UpdateInstaller {
                         onMessage("Actualizacion instalada.")
                     else -> {
                         val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-                        onMessage("No se pudo instalar: ${msg ?: "error desconocido"}")
+                        onMessage(explicarFallo(msg))
                     }
                 }
             }

@@ -161,6 +161,19 @@ class SourceActivity : ComponentActivity() {
             }
         }
 
+        // Descarga automatica: en cuanto se detecta una version nueva empieza a
+        // bajarla sola, sin que haya que pulsar nada. Al terminar, Android muestra
+        // su pantalla de confirmacion, que es el unico paso que no se puede evitar
+        // sin permisos de sistema.
+        var autoIniciada by remember { mutableStateOf(false) }
+        LaunchedEffect(update) {
+            val info = update
+            if (info != null && !autoIniciada && UpdateInstaller.canInstall(activity)) {
+                autoIniciada = true
+                startUpdate(info)
+            }
+        }
+
         Box(Modifier.fillMaxSize().background(Bg)) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -508,7 +521,7 @@ class SourceActivity : ComponentActivity() {
 
             when {
                 progress in 0..99 -> {
-                    Text("Descargando... $progress%", color = Accent, fontSize = 14.sp)
+                    Text("Descargando automaticamente... $progress%", color = Accent, fontSize = 14.sp)
                     Spacer(Modifier.height(6.dp))
                     Box(
                         Modifier
