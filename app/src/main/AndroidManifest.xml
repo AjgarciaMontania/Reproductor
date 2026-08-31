@@ -40,13 +40,12 @@
             </intent-filter>
         </activity>
 
+        <!--
+          Pantalla principal: video de fondo con el menu superpuesto.
+          Horizontal fija, porque el video ocupa toda la pantalla.
+        -->
         <activity
-            android:name=".ui.BrowseActivity"
-            android:exported="false"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode" />
-
-        <activity
-            android:name=".ui.PlayerActivity"
+            android:name=".ui.HomeActivity"
             android:exported="false"
             android:screenOrientation="landscape"
             android:launchMode="singleTask"

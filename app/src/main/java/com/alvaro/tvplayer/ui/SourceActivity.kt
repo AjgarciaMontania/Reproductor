@@ -133,7 +133,7 @@ class SourceActivity : ComponentActivity() {
                         ChannelChecker.reset()
                         PlaylistHolder.current = playlist
                         PlaylistHolder.sourceUrl = url
-                        startActivity(Intent(this@SourceActivity, BrowseActivity::class.java))
+                        startActivity(Intent(this@SourceActivity, HomeActivity::class.java))
                     }
                     .onFailure {
                         loading = false

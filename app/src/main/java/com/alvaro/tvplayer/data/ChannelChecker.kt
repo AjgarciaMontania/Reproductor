@@ -26,13 +26,12 @@ enum class ChannelStatus { DESCONOCIDO, PROBANDO, OK, CAIDO }
  * basta para saber si el servidor sigue ahi y acepta la peticion, y evita
  * gastar datos descargando video.
  *
- * Un canal marcado como caido puede fallar por estar bloqueado en tu pais,
- * porque la direccion ya no existe, o porque el servidor esta saturado en
- * ese momento. Por eso se puede volver a verificar cuando se quiera.
+ * Un canal caido puede estarlo por bloqueo geografico, por enlace muerto o
+ * porque el servidor estaba saturado en ese momento. Por eso los caidos se
+ * reintentan periodicamente en segundo plano: muchos vuelven solos.
  */
 object ChannelChecker {
 
-    /** Estado por canal, observable desde Compose. */
     val status = mutableStateMapOf<String, ChannelStatus>()
 
     var verificando by mutableStateOf(false)
@@ -41,6 +40,12 @@ object ChannelChecker {
         private set
     var total by mutableIntStateOf(0)
         private set
+    /** Ronda de reintento de caidos en curso (no muestra barra de progreso). */
+    var reintentando by mutableStateOf(false)
+        private set
+
+    private var prefs: Prefs? = null
+    private var listaUrl: String? = null
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(7, TimeUnit.SECONDS)
@@ -53,22 +58,57 @@ object ChannelChecker {
     fun statusOf(channel: Channel): ChannelStatus =
         status[channel.id] ?: ChannelStatus.DESCONOCIDO
 
-    /** Se llama al cargar una lista nueva. */
+    fun estaCaido(channel: Channel) = statusOf(channel) == ChannelStatus.CAIDO
+
+    /**
+     * Se llama al cargar una lista: limpia lo anterior y recupera de disco el
+     * resultado de la ultima verificacion de ESA lista, para no empezar de cero.
+     */
+    fun iniciar(prefs: Prefs, listaUrl: String, canales: List<Channel>) {
+        this.prefs = prefs
+        this.listaUrl = listaUrl
+        status.clear()
+        progreso = 0
+        total = 0
+        verificando = false
+
+        val (ok, caidos) = prefs.estadosGuardados(listaUrl)
+        if (ok.isEmpty() && caidos.isEmpty()) return
+        canales.forEach { c ->
+            val h = prefs.hashDe(c.id)
+            when (h) {
+                in ok -> status[c.id] = ChannelStatus.OK
+                in caidos -> status[c.id] = ChannelStatus.CAIDO
+            }
+        }
+    }
+
     fun reset() {
         status.clear()
         progreso = 0
         total = 0
         verificando = false
+        reintentando = false
+        prefs = null
+        listaUrl = null
     }
 
-    /** Marca un canal como caido tras un fallo real de reproduccion. */
     fun marcarCaido(channel: Channel) {
         status[channel.id] = ChannelStatus.CAIDO
+        persistir()
     }
 
-    /** Marca un canal como bueno cuando ha llegado a reproducirse. */
     fun marcarOk(channel: Channel) {
         status[channel.id] = ChannelStatus.OK
+        persistir()
+    }
+
+    private fun persistir() {
+        val p = prefs ?: return
+        val url = listaUrl ?: return
+        val ok = status.filterValues { it == ChannelStatus.OK }.keys.toSet()
+        val caidos = status.filterValues { it == ChannelStatus.CAIDO }.keys.toSet()
+        runCatching { p.guardarEstados(url, ok, caidos) }
     }
 
     private suspend fun probar(channel: Channel): Boolean = withContext(Dispatchers.IO) {
@@ -76,33 +116,39 @@ object ChannelChecker {
             val builder = Request.Builder()
                 .url(channel.url)
                 .header("User-Agent", channel.headers["User-Agent"] ?: "MiReproductorTV/1.0")
-                // Solo el principio del recurso: no queremos descargar video.
                 .header("Range", "bytes=0-1023")
             channel.headers.forEach { (k, v) ->
                 if (!k.equals("User-Agent", ignoreCase = true)) builder.header(k, v)
             }
-            client.newCall(builder.build()).execute().use { response ->
-                // 2xx incluye el 206 de contenido parcial.
-                response.isSuccessful
-            }
-        }.getOrDefault(false)   // URL invalida, timeout o DNS fallido = caido
+            client.newCall(builder.build()).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
     }
 
     /**
-     * Verifica una lista de canales con paralelismo limitado, para no
-     * saturar la red del televisor ni el propio dispositivo.
+     * Verificacion completa con barra de progreso. Si soloDesconocidos es true
+     * se saltan los canales cuyo estado ya se conoce de una sesion anterior.
      */
-    suspend fun verificar(canales: List<Channel>, concurrencia: Int = 6) = coroutineScope {
+    suspend fun verificar(
+        canales: List<Channel>,
+        concurrencia: Int = 6,
+        soloDesconocidos: Boolean = false
+    ) = coroutineScope {
         if (verificando) return@coroutineScope
+
+        val objetivo =
+            if (soloDesconocidos) canales.filter { statusOf(it) == ChannelStatus.DESCONOCIDO }
+            else canales
+        if (objetivo.isEmpty()) return@coroutineScope
+
         verificando = true
-        total = canales.size
+        total = objetivo.size
         progreso = 0
 
         val hechos = AtomicInteger(0)
         val permisos = Semaphore(concurrencia)
 
         try {
-            canales.map { canal ->
+            objetivo.map { canal ->
                 async {
                     permisos.withPermit {
                         status[canal.id] = ChannelStatus.PROBANDO
@@ -113,11 +159,38 @@ object ChannelChecker {
                 }
             }.awaitAll()
         } finally {
-            // Si se cancela a medias, los que quedaron en PROBANDO vuelven a desconocido.
-            canales.forEach { c ->
+            objetivo.forEach { c ->
                 if (status[c.id] == ChannelStatus.PROBANDO) status.remove(c.id)
             }
             verificando = false
+            persistir()
+        }
+    }
+
+    /**
+     * Reintenta en segundo plano los canales marcados como caidos, por si han
+     * vuelto. Silencioso: no toca la barra de progreso ni molesta al usuario.
+     */
+    suspend fun reintentarCaidos(canales: List<Channel>, concurrencia: Int = 4) = coroutineScope {
+        if (verificando || reintentando) return@coroutineScope
+        val caidos = canales.filter { statusOf(it) == ChannelStatus.CAIDO }
+        if (caidos.isEmpty()) return@coroutineScope
+
+        reintentando = true
+        val permisos = Semaphore(concurrencia)
+        try {
+            caidos.map { canal ->
+                async {
+                    permisos.withPermit {
+                        // Solo se sube a OK; si sigue fallando se queda como estaba,
+                        // para no hacerlo parpadear en la grilla.
+                        if (probar(canal)) status[canal.id] = ChannelStatus.OK
+                    }
+                }
+            }.awaitAll()
+        } finally {
+            reintentando = false
+            persistir()
         }
     }
 }
