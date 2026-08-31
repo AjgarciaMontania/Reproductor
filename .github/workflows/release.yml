@@ -2,7 +2,9 @@ name: Publicar version
 
 # Se dispara al crear una etiqueta v1.0, v1.1, ... o a mano desde la pestaña Actions.
 on:
+  # Cada subida a main publica version: asi basta con hacer git push.
   push:
+    branches: [ main ]
     tags: [ 'v*' ]
   workflow_dispatch:
     inputs:
@@ -43,18 +45,35 @@ jobs:
       - name: Calcular version
         id: v
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            NAME="${GITHUB_REF_NAME#v}"
-            NOTES="Version ${NAME}"
-          else
-            NAME="${{ github.event.inputs.version }}"
-            NOTES="${{ github.event.inputs.notas }}"
-          fi
+          case "$GITHUB_REF" in
+            refs/tags/*)
+              # Publicacion por etiqueta: v1.5 -> 1.5
+              NAME="${GITHUB_REF_NAME#v}"
+              NOTES="Version ${NAME}"
+              ;;
+            *)
+              if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                NAME="${{ github.event.inputs.version }}"
+                NOTES="${{ github.event.inputs.notas }}"
+              else
+                # Push normal a main: la version se numera sola y las notas
+                # salen del ultimo commit, que es lo que vera la app.
+                NAME="1.${{ github.run_number }}"
+                NOTES="$(git log -1 --pretty=%s)"
+              fi
+              ;;
+          esac
+
+          # Se limpian comillas y saltos: estas notas van dentro de un JSON.
+          NOTES="$(printf '%s' "$NOTES" | tr -d '"\\\\' | tr '\n' ' ' | cut -c1-180)"
+          [ -z "$NOTES" ] && NOTES="Mejoras y correcciones."
+
           # El versionCode usa el numero de ejecucion: siempre sube, nunca se repite.
           echo "name=${NAME}"        >> "$GITHUB_OUTPUT"
           echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           echo "notes=${NOTES}"      >> "$GITHUB_OUTPUT"
           echo "tag=v${NAME}"        >> "$GITHUB_OUTPUT"
+          echo "Publicando ${NAME} (codigo ${{ github.run_number }}): ${NOTES}"
 
       - name: Comprobar que estan los cuatro secrets
         env:

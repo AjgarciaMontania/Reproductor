@@ -1,9 +1,16 @@
-name: Compilar APK
+name: Compilar APK de prueba (sin firmar con tu llave)
 
-# Se ejecuta al subir cambios y tambien a mano desde la pestaña Actions.
+# SOLO manual, a proposito.
+#
+# Este flujo produce un APK firmado con la llave de DEPURACION, util para
+# comprobar que el codigo compila, pero que NO sirve como actualizacion:
+# al tener otra firma, Android lo rechaza sobre la app instalada
+# ("signatures do not match").
+#
+# Antes se ejecutaba en cada push y su artefacto se confundia con el bueno.
+# El APK que hay que instalar es el de la pestaña Releases, que publica
+# el flujo "Publicar version".
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
