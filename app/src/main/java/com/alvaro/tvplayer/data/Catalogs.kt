@@ -74,6 +74,13 @@ object Catalogs {
             "En español",
             "Todo el catalogo en idioma español",
             "$IPTV_ORG/languages/spa.m3u"
+        ),
+        // Entra en la fusion inicial, asi que aparece como una categoria mas
+        // dentro de TV EN VIVO, no como un catalogo aparte que haya que cargar.
+        Catalog(
+            "Adultos +18",
+            "Categoria xxx de iptv-org",
+            "$IPTV_ORG/categories/xxx.m3u"
         )
     )
 }
