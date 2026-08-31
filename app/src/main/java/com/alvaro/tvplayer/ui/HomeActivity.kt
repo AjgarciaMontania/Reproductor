@@ -122,14 +122,22 @@ class HomeActivity : ComponentActivity() {
         var cargandoLista by remember { mutableStateOf(false) }
         var aviso by remember { mutableStateOf<String?>(null) }
 
+        val prefsRaiz = remember { Prefs(this) }
+        var extras by remember { mutableStateOf(prefsRaiz.listasExtra()) }
+
         fun cargarTodo() {
             cargando = true
             errorCarga = null
             hechos = 0
             lifecycleScope.launch {
+                // Las listas que el usuario añadio se vuelven a fusionar: antes
+                // recargar los catalogos las borraba todas sin avisar.
+                val extrasCatalogos = prefsRaiz.listasExtra().map { u ->
+                    Catalog(u.substringAfterLast('/').ifBlank { u }, u, u)
+                }
                 runCatching {
                     PlaylistRepository.loadAll(
-                        Catalogs.presets,
+                        Catalogs.presets + extrasCatalogos,
                         onProgress = { h, t -> hechos = h; totalCat = t },
                         onFallidos = { lista ->
                             // Si algun catalogo no responde, el total de canales
@@ -167,7 +175,10 @@ class HomeActivity : ComponentActivity() {
                 try {
                 runCatching { PlaylistRepository.load(url) }
                     .onSuccess { nueva ->
-                        Prefs(this@HomeActivity).addRecentPlaylist(url)
+                        prefsRaiz.addRecentPlaylist(url)
+                        // Queda registrada para sobrevivir a una recarga.
+                        prefsRaiz.anadirListaExtra(url)
+                        extras = prefsRaiz.listasExtra()
 
                         // SE SUMA, no se reemplaza. Antes cargar un catalogo
                         // borraba los miles de canales ya fusionados y dejaba
@@ -224,6 +235,12 @@ class HomeActivity : ComponentActivity() {
                 recargando = cargando || cargandoLista,
                 aviso = aviso,
                 onDescartarAviso = { aviso = null },
+                listasExtra = extras,
+                onQuitarExtra = { u ->
+                    prefsRaiz.quitarListaExtra(u)
+                    extras = prefsRaiz.listasExtra()
+                    aviso = "Lista quitada. Pulsa Recargar para aplicar el cambio."
+                },
                 onRecargarTodo = { aviso = "Recargando todos los catalogos..."; cargarTodo() },
                 onCargarUna = ::cargarUna
             )
@@ -289,6 +306,8 @@ class HomeActivity : ComponentActivity() {
         recargando: Boolean,
         aviso: String?,
         onDescartarAviso: () -> Unit,
+        listasExtra: List<String>,
+        onQuitarExtra: (String) -> Unit,
         onRecargarTodo: () -> Unit,
         onCargarUna: (String, () -> Unit) -> Unit
     ) {
@@ -747,6 +766,8 @@ class HomeActivity : ComponentActivity() {
                                     updateMsg = updateMsg,
                                     progreso = progresoDescarga,
                                     aviso = aviso,
+                                    listasExtra = listasExtra,
+                                    onQuitarExtra = onQuitarExtra,
                                     onRecargar = onRecargarTodo,
                                     // Al terminar salta a TV EN VIVO, que es donde
                                     // estan los canales que se acaban de cargar.
@@ -1338,6 +1359,7 @@ class HomeActivity : ComponentActivity() {
         pestana: Int, onPestana: (Int) -> Unit,
         filtro: String, onFiltro: (String) -> Unit,
         origenMsg: String, aviso: String?,
+        listasExtra: List<String>, onQuitarExtra: (String) -> Unit,
         versionNombre: String, versionCodigo: Int,
         diagnosticoFirma: String, firmaOk: Boolean,
         update: UpdateInfo?, updateMsg: String?, progreso: Int,
@@ -1459,6 +1481,40 @@ class HomeActivity : ComponentActivity() {
                                     color = if (enf) Color.White else TextMuted,
                                     fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
+                        }
+                    }
+                }
+            }
+
+            // ---- listas que el usuario ha ido añadiendo ----
+            if (listasExtra.isNotEmpty()) {
+                item {
+                    Spacer(Modifier.height(10.dp))
+                    Text("Listas añadidas por ti (${listasExtra.size})",
+                        color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Se vuelven a cargar al recargar los catalogos",
+                        color = TextMuted, fontSize = 9.5.sp)
+                    Spacer(Modifier.height(5.dp))
+                }
+                items(listasExtra) { u ->
+                    FocusableCard(
+                        onClick = { onQuitarExtra(u) },
+                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = Color(0x26FFFFFF),
+                        focusedContainerColor = Color(0x66FF6B5E),
+                        shape = RoundedCornerShape(8.dp)
+                    ) { enf ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(u.substringAfterLast('/').ifBlank { u },
+                                color = if (enf) Color.White else Color(0xFFDCE1E7),
+                                fontSize = 11.5.sp, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f))
+                            Text(if (enf) "Pulsa para quitar" else "Quitar",
+                                color = if (enf) Color.White else TextMuted, fontSize = 9.5.sp)
                         }
                     }
                 }

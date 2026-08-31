@@ -81,6 +81,24 @@ class Prefs(context: Context) {
 
     fun hashDe(id: String) = clave(id)
 
+    // --- Listas que el usuario añadio a mano ---
+    //
+    // Se guardan aparte de las "recientes" porque cumplen otra funcion: al
+    // recargar los catalogos hay que volver a fusionarlas, o se pierden todas
+    // las listas que la persona habia ido sumando.
+
+    fun listasExtra(): List<String> =
+        sp.getString(KEY_EXTRA, "")!!.split("\n").filter { it.isNotBlank() }
+
+    fun anadirListaExtra(url: String) {
+        val lista = (listasExtra() + url).distinct().takeLast(20)
+        sp.edit().putString(KEY_EXTRA, lista.joinToString("\n")).apply()
+    }
+
+    fun quitarListaExtra(url: String) {
+        sp.edit().putString(KEY_EXTRA, listasExtra().filterNot { it == url }.joinToString("\n")).apply()
+    }
+
 
     // --- Progreso de peliculas y series (no aplica a TV en vivo) ---
 
@@ -133,5 +151,6 @@ class Prefs(context: Context) {
         const val KEY_DEAD = "dead2_"
         const val KEY_CHECKED = "checked_"
         const val KEY_PROG = "prog_"
+        const val KEY_EXTRA = "listas_extra"
     }
 }
