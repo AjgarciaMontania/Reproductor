@@ -168,11 +168,26 @@ class HomeActivity : ComponentActivity() {
                 runCatching { PlaylistRepository.load(url) }
                     .onSuccess { nueva ->
                         Prefs(this@HomeActivity).addRecentPlaylist(url)
-                        PlaylistHolder.current = nueva
-                        PlaylistHolder.sourceUrl = url
-                        playlist = nueva
-                        aviso = "Cargados ${nueva.channels.size} canales " +
-                                "en ${nueva.groups.size} categorias."
+
+                        // SE SUMA, no se reemplaza. Antes cargar un catalogo
+                        // borraba los miles de canales ya fusionados y dejaba
+                        // solo los de esa lista, sin avisar y sin vuelta atras
+                        // salvo recargando todo.
+                        val actual = playlist
+                        val fusionada = if (actual == null) nueva else {
+                            val vistas = actual.channels.mapTo(HashSet()) { it.url }
+                            val nuevos = nueva.channels.filter { vistas.add(it.url) }
+                            Playlist(actual.channels + nuevos, actual.epgUrl ?: nueva.epgUrl)
+                        }
+                        val añadidos = fusionada.channels.size - (actual?.channels?.size ?: 0)
+
+                        PlaylistHolder.current = fusionada
+                        playlist = fusionada
+                        aviso = if (añadidos > 0)
+                            "Añadidos $añadidos canales. Ahora tienes " +
+                            "${fusionada.channels.size} en ${fusionada.groups.size} categorias."
+                        else
+                            "Esa lista no aporta canales nuevos: ya los tenias todos."
                         alTerminar()
                     }
                     .onFailure {

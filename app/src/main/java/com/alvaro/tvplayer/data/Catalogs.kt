@@ -74,13 +74,11 @@ object Catalogs {
             "En español",
             "Todo el catalogo en idioma español",
             "$IPTV_ORG/languages/spa.m3u"
-        ),
-        // Entra en la fusion inicial, asi que aparece como una categoria mas
-        // dentro de TV EN VIVO, no como un catalogo aparte que haya que cargar.
-        Catalog(
-            "XXX  ·  Adultos +18",
-            "Categoria xxx de iptv-org, contenido para adultos",
-            "$IPTV_ORG/categories/xxx.m3u"
         )
+        // NOTA: no se incluye categories/xxx.m3u. La categoria existe en el
+        // indice de iptv-org, pero esa lista se descarga vacia: el proyecto no
+        // publica canales adultos. Tenerla aqui solo gastaba una peticion en
+        // cada arranque y disparaba el aviso de "catalogo que no respondio".
+        // Sigue disponible en el explorador por si algun dia la rellenan.
     )
 }
