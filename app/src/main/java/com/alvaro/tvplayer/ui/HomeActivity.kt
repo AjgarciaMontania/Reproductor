@@ -119,6 +119,8 @@ class HomeActivity : ComponentActivity() {
         var hechos by remember { mutableIntStateOf(0) }
         var totalCat by remember { mutableIntStateOf(Catalogs.presets.size) }
         var errorCarga by remember { mutableStateOf<String?>(null) }
+        var cargandoLista by remember { mutableStateOf(false) }
+        var aviso by remember { mutableStateOf<String?>(null) }
 
         fun cargarTodo() {
             cargando = true
@@ -141,21 +143,28 @@ class HomeActivity : ComponentActivity() {
             }
         }
 
-        fun cargarUna(url: String) {
-            cargando = true
-            errorCarga = null
+        // Carga de un catalogo suelto. Antes no daba ninguna señal: ni progreso,
+        // ni error, ni confirmacion, porque esos avisos solo se pintaban en la
+        // pantalla de arranque. Ahora informa siempre y avisa al terminar.
+        fun cargarUna(url: String, alTerminar: () -> Unit = {}) {
+            if (cargandoLista) return
+            cargandoLista = true
+            aviso = "Cargando lista..."
             lifecycleScope.launch {
                 runCatching { PlaylistRepository.load(url) }
-                    .onSuccess {
+                    .onSuccess { nueva ->
                         Prefs(this@HomeActivity).addRecentPlaylist(url)
-                        PlaylistHolder.current = it
+                        PlaylistHolder.current = nueva
                         PlaylistHolder.sourceUrl = url
-                        playlist = it
-                        cargando = false
+                        playlist = nueva
+                        cargandoLista = false
+                        aviso = "Cargados ${nueva.channels.size} canales " +
+                                "en ${nueva.groups.size} categorias."
+                        alTerminar()
                     }
                     .onFailure {
-                        cargando = false
-                        errorCarga = it.message ?: "No se pudo cargar la lista."
+                        cargandoLista = false
+                        aviso = "No se pudo cargar: ${it.message ?: "error desconocido"}"
                     }
             }
         }
@@ -166,7 +175,14 @@ class HomeActivity : ComponentActivity() {
         if (lista == null) {
             PantallaCarga(cargando, hechos, totalCat, errorCarga) { cargarTodo() }
         } else {
-            HomeScreen(lista, cargando, ::cargarTodo, ::cargarUna)
+            HomeScreen(
+                playlist = lista,
+                recargando = cargando || cargandoLista,
+                aviso = aviso,
+                onDescartarAviso = { aviso = null },
+                onRecargarTodo = { aviso = "Recargando todos los catalogos..."; cargarTodo() },
+                onCargarUna = ::cargarUna
+            )
         }
     }
 
@@ -227,8 +243,10 @@ class HomeActivity : ComponentActivity() {
     private fun HomeScreen(
         playlist: Playlist,
         recargando: Boolean,
+        aviso: String?,
+        onDescartarAviso: () -> Unit,
         onRecargarTodo: () -> Unit,
-        onCargarUna: (String) -> Unit
+        onCargarUna: (String, () -> Unit) -> Unit
     ) {
         val prefs = remember { Prefs(this) }
         val actividad = this
@@ -680,8 +698,17 @@ class HomeActivity : ComponentActivity() {
                                     update = update,
                                     updateMsg = updateMsg,
                                     progreso = progresoDescarga,
+                                    aviso = aviso,
                                     onRecargar = onRecargarTodo,
-                                    onCargarUrl = onCargarUna,
+                                    // Al terminar salta a TV EN VIVO, que es donde
+                                    // estan los canales que se acaban de cargar.
+                                    onCargarUrl = { url ->
+                                        onCargarUna(url) {
+                                            seccion = Seccion.TV
+                                            listaCategorias = false
+                                            filtroCategoria = ""
+                                        }
+                                    },
                                     onActualizar = { update?.let { instalarUpdate(it) } },
                                     onComprobar = {
                                         lifecycleScope.launch {
@@ -1262,7 +1289,7 @@ class HomeActivity : ComponentActivity() {
         catalogosApi: List<Catalog>, cargandoApi: Boolean,
         pestana: Int, onPestana: (Int) -> Unit,
         filtro: String, onFiltro: (String) -> Unit,
-        origenMsg: String,
+        origenMsg: String, aviso: String?,
         versionNombre: String, versionCodigo: Int,
         diagnosticoFirma: String, firmaOk: Boolean,
         update: UpdateInfo?, updateMsg: String?, progreso: Int,
@@ -1280,6 +1307,26 @@ class HomeActivity : ComponentActivity() {
                     fontWeight = FontWeight.Bold)
                 Text("$totalCanales canales · $categorias categorias",
                     color = TextMuted, fontSize = 10.sp)
+
+                // Estado de la ultima carga: sin esto, pulsar un catalogo no
+                // daba ninguna señal de exito ni de fallo.
+                aviso?.let { msg ->
+                    Spacer(Modifier.height(6.dp))
+                    val error = msg.startsWith("No se pudo")
+                    Box(
+                        Modifier.fillMaxWidth()
+                            .background(
+                                if (error) Color(0x333A1714) else Color(0x1A4C8DFF),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(10.dp)
+                    ) {
+                        Text(msg,
+                            color = if (error) Color(0xFFFF8A7E) else Accent,
+                            fontSize = 11.sp)
+                    }
+                }
+
                 Spacer(Modifier.height(6.dp))
                 Boton("Recargar todos los catalogos", onRecargar)
             }
