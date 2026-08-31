@@ -58,18 +58,27 @@ object PlaylistRepository {
      */
     suspend fun loadAll(
         catalogos: List<Catalog>,
-        onProgress: (hechos: Int, total: Int) -> Unit = { _, _ -> }
+        onProgress: (hechos: Int, total: Int) -> Unit = { _, _ -> },
+        // Los catalogos que fallan se ignoran para no romper el arranque, pero
+        // hay que decirlo: si uno se cae, el total de canales baja sin motivo
+        // aparente y parece que la app perdio canales sola.
+        onFallidos: (List<String>) -> Unit = {}
     ): Playlist = coroutineScope {
         val hechos = AtomicInteger(0)
         onProgress(0, catalogos.size)
 
+        val fallidos = java.util.Collections.synchronizedList(mutableListOf<String>())
+
         val resultados = catalogos.map { cat ->
             async(Dispatchers.IO) {
                 val r = runCatching { load(cat.url) }.getOrNull()
+                if (r == null) fallidos += cat.title
                 onProgress(hechos.incrementAndGet(), catalogos.size)
                 r
             }
         }.awaitAll()
+
+        onFallidos(fallidos.toList())
 
         val vistas = HashSet<String>()
         val canales = ArrayList<Channel>()

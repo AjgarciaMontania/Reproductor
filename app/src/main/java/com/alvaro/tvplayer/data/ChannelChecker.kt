@@ -111,17 +111,34 @@ object ChannelChecker {
         runCatching { p.guardarEstados(url, ok, caidos) }
     }
 
+    /**
+     * Comprueba si el servidor del canal sigue vivo.
+     *
+     * NO se envia cabecera Range: una emision en directo no es un fichero con
+     * posiciones, y muchisimos servidores responden 400, 405 o 416 a un Range.
+     * Pedirlo marcaba como caidos canales que funcionaban perfectamente.
+     *
+     * Y solo se da por caido lo que lo demuestra: un fallo de conexion, o un
+     * 404/410 que dice que ahi ya no hay nada. Un 403 puede ser geobloqueo o
+     * falta de cabeceras y aun asi reproducirse, asi que no basta para
+     * esconder el canal.
+     */
     private suspend fun probar(channel: Channel): Boolean = withContext(Dispatchers.IO) {
         runCatching {
             val builder = Request.Builder()
                 .url(channel.url)
                 .header("User-Agent", channel.headers["User-Agent"] ?: "MiReproductorTV/1.0")
-                .header("Range", "bytes=0-1023")
             channel.headers.forEach { (k, v) ->
                 if (!k.equals("User-Agent", ignoreCase = true)) builder.header(k, v)
             }
-            client.newCall(builder.build()).execute().use { it.isSuccessful }
-        }.getOrDefault(false)
+            // Se cierra en cuanto llegan las cabeceras: no se descarga video.
+            client.newCall(builder.build()).execute().use { r ->
+                when (r.code) {
+                    404, 410 -> false
+                    else -> true
+                }
+            }
+        }.getOrDefault(false)   // sin conexion, DNS fallido o timeout
     }
 
     /**

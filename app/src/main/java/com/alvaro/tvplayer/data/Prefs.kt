@@ -126,8 +126,11 @@ class Prefs(context: Context) {
         const val KEY_RECENT = "recent_playlists"
         const val KEY_RECENT_CH = "recent_channels"
         const val KEY_LAST = "last_channel"
-        const val KEY_OK = "ok_"
-        const val KEY_DEAD = "dead_"
+        // El sufijo 2 descarta los resultados guardados con el criterio
+        // anterior, que usaba cabecera Range y marcaba como caidos muchos
+        // canales que si funcionaban.
+        const val KEY_OK = "ok2_"
+        const val KEY_DEAD = "dead2_"
         const val KEY_CHECKED = "checked_"
         const val KEY_PROG = "prog_"
     }

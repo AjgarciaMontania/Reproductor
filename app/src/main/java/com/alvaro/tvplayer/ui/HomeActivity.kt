@@ -128,9 +128,19 @@ class HomeActivity : ComponentActivity() {
             hechos = 0
             lifecycleScope.launch {
                 runCatching {
-                    PlaylistRepository.loadAll(Catalogs.presets) { h, t ->
-                        hechos = h; totalCat = t
-                    }
+                    PlaylistRepository.loadAll(
+                        Catalogs.presets,
+                        onProgress = { h, t -> hechos = h; totalCat = t },
+                        onFallidos = { lista ->
+                            // Si algun catalogo no responde, el total de canales
+                            // baja y sin este aviso parece cosa de magia.
+                            if (lista.isNotEmpty()) {
+                                aviso = "No respondieron ${lista.size} catalogos " +
+                                        "(${lista.joinToString(", ").take(90)}). " +
+                                        "Por eso hay menos canales de lo normal."
+                            }
+                        }
+                    )
                 }.onSuccess {
                     PlaylistHolder.current = it
                     PlaylistHolder.sourceUrl = "catalogos-abiertos"
@@ -151,21 +161,26 @@ class HomeActivity : ComponentActivity() {
             cargandoLista = true
             aviso = "Cargando lista..."
             lifecycleScope.launch {
+                // try/finally: si la corrutina se cancela a media carga, sin esto
+                // cargandoLista se quedaba en true y ningun otro catalogo volvia
+                // a poder cargarse, sin explicacion.
+                try {
                 runCatching { PlaylistRepository.load(url) }
                     .onSuccess { nueva ->
                         Prefs(this@HomeActivity).addRecentPlaylist(url)
                         PlaylistHolder.current = nueva
                         PlaylistHolder.sourceUrl = url
                         playlist = nueva
-                        cargandoLista = false
                         aviso = "Cargados ${nueva.channels.size} canales " +
                                 "en ${nueva.groups.size} categorias."
                         alTerminar()
                     }
                     .onFailure {
-                        cargandoLista = false
                         aviso = "No se pudo cargar: ${it.message ?: "error desconocido"}"
                     }
+                } finally {
+                    cargandoLista = false
+                }
             }
         }
 
@@ -563,7 +578,11 @@ class HomeActivity : ComponentActivity() {
         }
 
         val canalesPanel: List<Channel> = when (seccion) {
-            Seccion.TV -> playlist.channels.filter { it.group == categoria && !ChannelChecker.estaCaido(it) }
+            // Ya NO se ocultan los caidos: la verificacion es una pista, no una
+            // verdad. Se muestran todos con su punto de color, y el usuario
+            // decide. Esconderlos vaciaba categorias enteras por falsos
+            // negativos del verificador.
+            Seccion.TV -> playlist.channels.filter { it.group == categoria }
             Seccion.FAVORITOS -> playlist.channels.filter { it.id in favoritos }
             Seccion.RECIENTE -> {
                 val orden = prefs.recentChannels()
