@@ -53,7 +53,13 @@ object M3uParser {
                         it.groupValues[1].lowercase() to it.groupValues[2]
                     }
                     pendingLogo = attrs["tvg-logo"]?.takeIf { it.isNotBlank() }
-                    pendingGroup = attrs["group-title"]?.takeIf { it.isNotBlank() }
+                    // group-title a veces trae varias categorias juntas
+                    // ("Animation;Classic"). Se toma la primera, o si no
+                    // aparecerian categorias duplicadas y sin sentido.
+                    pendingGroup = attrs["group-title"]
+                        ?.substringBefore(';')
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
                     pendingTvgId = attrs["tvg-id"]?.takeIf { it.isNotBlank() }
 
                     // El nombre visible empieza tras la PRIMERA coma que no este entre comillas.

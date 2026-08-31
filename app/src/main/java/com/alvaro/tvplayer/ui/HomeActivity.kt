@@ -83,6 +83,16 @@ class HomeActivity : ComponentActivity() {
 
     private var verifyJob: Job? = null
     private var manejadorTeclas: ((Int) -> Boolean)? = null
+    private var reproductor: ExoPlayer? = null
+
+    /**
+     * Al salir de la app se detiene el sonido. Sin esto el canal seguia
+     * sonando en segundo plano indefinidamente.
+     */
+    override fun onStop() {
+        super.onStop()
+        reproductor?.pause()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -226,7 +236,16 @@ class HomeActivity : ComponentActivity() {
         var seccion by remember { mutableStateOf(Seccion.TV) }
         var menuVisible by remember { mutableStateOf(true) }
         var favoritos by remember { mutableStateOf(prefs.favorites()) }
-        var categoria by remember(playlist) { mutableStateOf(playlist.groups.firstOrNull() ?: "") }
+        // Categoria inicial: se prefiere Colombia, y si no la mas poblada.
+        // Antes se cogia la primera alfabeticamente, que acababa siendo Albania.
+        val categoriaInicial = remember(playlist) {
+            playlist.groups.firstOrNull { Search.normalizar(it).contains("colombia") }
+                ?: playlist.groups.maxByOrNull { g -> playlist.channels.count { it.group == g } }
+                ?: ""
+        }
+        var categoria by remember(playlist) { mutableStateOf(categoriaInicial) }
+        var listaCategorias by remember { mutableStateOf(false) }
+        var filtroCategoria by remember { mutableStateOf("") }
         var consulta by remember { mutableStateOf("") }
 
         var canalActual by remember { mutableStateOf<Channel?>(null) }
@@ -277,7 +296,10 @@ class HomeActivity : ComponentActivity() {
             }.getOrDefault(1)
         }
 
-        val exo = remember { ExoPlayer.Builder(actividad).build().apply { playWhenReady = true } }
+        val exo = remember {
+            ExoPlayer.Builder(actividad).build().apply { playWhenReady = true }
+                .also { reproductor = it }
+        }
 
         DisposableEffect(Unit) {
             val l = object : Player.Listener {
@@ -314,6 +336,7 @@ class HomeActivity : ComponentActivity() {
             }
             onDispose {
                 exo.removeListener(l); exo.release()
+                reproductor = null
                 runCatching { actividad.unregisterReceiver(receptor) }
             }
         }
@@ -684,9 +707,15 @@ class HomeActivity : ComponentActivity() {
                                         Seccion.FAVORITOS -> "Favoritos"
                                         else -> "Vistos recientemente"
                                     },
+                                    esTv = seccion == Seccion.TV,
                                     categorias = if (seccion == Seccion.TV) playlist.groups else emptyList(),
                                     categoriaActual = categoria,
-                                    onCategoria = { categoria = it },
+                                    conteoDe = { g -> playlist.channels.count { it.group == g } },
+                                    mostrandoCategorias = listaCategorias,
+                                    onMostrarCategorias = { listaCategorias = it },
+                                    filtroCategoria = filtroCategoria,
+                                    onFiltroCategoria = { filtroCategoria = it },
+                                    onCategoria = { categoria = it; listaCategorias = false },
                                     canales = canalesPanel,
                                     favoritos = favoritos,
                                     actual = canalActual,
@@ -953,32 +982,85 @@ class HomeActivity : ComponentActivity() {
 
     @Composable
     private fun PanelCanales(
-        titulo: String, categorias: List<String>, categoriaActual: String,
+        titulo: String, esTv: Boolean, categorias: List<String>, categoriaActual: String,
+        conteoDe: (String) -> Int,
+        mostrandoCategorias: Boolean, onMostrarCategorias: (Boolean) -> Unit,
+        filtroCategoria: String, onFiltroCategoria: (String) -> Unit,
         onCategoria: (String) -> Unit, canales: List<Channel>, favoritos: Set<String>,
         actual: Channel?, onCanal: (Channel) -> Unit, onFavorito: (Channel) -> Unit
     ) {
         Column {
-            Text(titulo.ifBlank { "Canales" }, color = Color.White, fontSize = 14.sp,
-                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(bottom = 7.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (esTv && mostrandoCategorias) "Elegir categoria"
+                        else titulo.ifBlank { "Canales" },
+                        color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                    if (esTv && !mostrandoCategorias) {
+                        Text("${categorias.size} categorias disponibles",
+                            color = TextMuted, fontSize = 9.sp)
+                    }
+                }
+                // Con cientos de categorias, una fila de chips no sirve:
+                // se abre un listado vertical con buscador.
+                if (esTv) {
+                    FocusableCard(
+                        onClick = { onMostrarCategorias(!mostrandoCategorias) },
+                        containerColor = if (mostrandoCategorias) Accent else Color(0x33FFFFFF),
+                        focusedContainerColor = Accent, shape = RoundedCornerShape(7.dp)
+                    ) {
+                        Text(
+                            if (mostrandoCategorias) "Cerrar" else "Categorias",
+                            color = Color.White, fontSize = 10.5.sp,
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp)
+                        )
+                    }
+                }
+            }
 
-            if (categorias.isNotEmpty()) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    items(categorias) { g ->
-                        FocusableCard(
-                            onClick = { onCategoria(g) },
-                            containerColor = if (g == categoriaActual) Accent else Color(0x33FFFFFF),
-                            focusedContainerColor = Accent, shape = RoundedCornerShape(20.dp)
-                        ) {
-                            Text(g, color = Color.White, fontSize = 10.5.sp, maxLines = 1,
-                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp))
+            Spacer(Modifier.height(7.dp))
+
+            if (esTv && mostrandoCategorias) {
+                CampoTexto(filtroCategoria, onFiltroCategoria,
+                    "Escribe un pais o categoria (${categorias.size})...")
+                Spacer(Modifier.height(7.dp))
+
+                val q = Search.normalizar(filtroCategoria)
+                val visibles = if (q.isBlank()) categorias
+                               else categorias.filter { Search.coincide(it, q) }
+
+                if (visibles.isEmpty()) {
+                    Text("Sin coincidencias.", color = TextMuted, fontSize = 12.sp)
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        items(visibles, key = { it }) { g ->
+                            FocusableCard(
+                                onClick = { onCategoria(g) },
+                                modifier = Modifier.fillMaxWidth(),
+                                containerColor = if (g == categoriaActual) Color(0x4D4C8DFF)
+                                                 else Color(0x26FFFFFF),
+                                focusedContainerColor = Accent, shape = RoundedCornerShape(8.dp)
+                            ) { enf ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(g,
+                                        color = if (enf || g == categoriaActual) Color.White
+                                                else Color(0xFFDCE1E7),
+                                        fontSize = 12.sp, maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f))
+                                    Text("${conteoDe(g)}",
+                                        color = if (enf) Color.White else TextMuted, fontSize = 10.sp)
+                                }
+                            }
                         }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-            }
-
-            if (canales.isEmpty()) {
+            } else if (canales.isEmpty()) {
                 Text("No hay canales aqui todavia.", color = TextMuted, fontSize = 12.sp)
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
