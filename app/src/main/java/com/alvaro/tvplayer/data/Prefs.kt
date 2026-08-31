@@ -81,12 +81,6 @@ class Prefs(context: Context) {
 
     fun hashDe(id: String) = clave(id)
 
-    // --- Contenido adulto: desactivado salvo que se active a proposito ---
-
-    fun mostrarAdultos(): Boolean = sp.getBoolean(KEY_ADULTOS, false)
-
-    fun setMostrarAdultos(valor: Boolean) =
-        sp.edit().putBoolean(KEY_ADULTOS, valor).apply()
 
     // --- Progreso de peliculas y series (no aplica a TV en vivo) ---
 
@@ -136,6 +130,5 @@ class Prefs(context: Context) {
         const val KEY_DEAD = "dead_"
         const val KEY_CHECKED = "checked_"
         const val KEY_PROG = "prog_"
-        const val KEY_ADULTOS = "mostrar_adultos"
     }
 }

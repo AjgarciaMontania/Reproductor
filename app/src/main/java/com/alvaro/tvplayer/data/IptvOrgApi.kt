@@ -31,9 +31,6 @@ object IptvOrgApi {
     /** Cajon tecnico sin contenido real: nunca se ofrece. */
     private val EXCLUIDAS = setOf("auto")
 
-    /** Categoria de contenido adulto: solo si se activa expresamente. */
-    private const val ADULTOS = "xxx"
-
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
@@ -53,18 +50,14 @@ object IptvOrgApi {
         }.getOrNull()
     }
 
-    /**
-     * Todas las categorias publicadas.
-     * La de adultos solo se incluye si se pide explicitamente.
-     */
-    suspend fun categorias(incluirAdultos: Boolean = false): List<Catalog> {
+    /** Todas las categorias publicadas, incluida la de adultos. */
+    suspend fun categorias(): List<Catalog> {
         val arr = pedirArray("$API/categories.json") ?: return emptyList()
         return buildList {
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
                 val id = o.optString("id").lowercase()
                 if (id.isBlank() || id in EXCLUIDAS) continue
-                if (id == ADULTOS && !incluirAdultos) continue
                 val nombre = o.optString("name").ifBlank { id.replaceFirstChar { c -> c.uppercase() } }
                 val desc = o.optString("description").take(70)
                 add(Catalog(nombre, desc.ifBlank { "Categoria $nombre" }, "$LISTAS/categories/$id.m3u"))

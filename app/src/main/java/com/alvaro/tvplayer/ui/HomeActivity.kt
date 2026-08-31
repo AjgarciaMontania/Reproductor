@@ -273,7 +273,6 @@ class HomeActivity : ComponentActivity() {
         var pestanaCat by remember { mutableIntStateOf(0) }
         var filtroCat by remember { mutableStateOf("") }
         var origenCat by remember { mutableStateOf("") }
-        var adultos by remember { mutableStateOf(prefs.mostrarAdultos()) }
 
         var coleccion by remember { mutableStateOf(ArchiveMovies.colecciones.first().id) }
         var peliculas by remember { mutableStateOf<List<Movie>>(emptyList()) }
@@ -453,11 +452,11 @@ class HomeActivity : ComponentActivity() {
         }
         // Al entrar en LISTAS se piden los indices. CatalogRepository une la API
         // con las listas fijas, y si la API no responde sigue con las fijas.
-        LaunchedEffect(seccion, adultos) {
+        LaunchedEffect(seccion) {
             if (seccion != Seccion.LISTAS) return@LaunchedEffect
             cargandoApi = true
             try {
-                val c = CatalogRepository.categorias(adultos)
+                val c = CatalogRepository.categorias()
                 val p = CatalogRepository.paises()
                 catCategorias = c.catalogos
                 catPaises = p.catalogos
@@ -674,8 +673,6 @@ class HomeActivity : ComponentActivity() {
                                     filtro = filtroCat,
                                     onFiltro = { filtroCat = it },
                                     origenMsg = origenCat,
-                                    mostrarAdultos = adultos,
-                                    onAdultos = { adultos = it; prefs.setMostrarAdultos(it) },
                                     versionNombre = versionNombre,
                                     versionCodigo = versionCodigo,
                                     diagnosticoFirma = AppSignature.diagnostico(actividad),
@@ -1265,7 +1262,7 @@ class HomeActivity : ComponentActivity() {
         catalogosApi: List<Catalog>, cargandoApi: Boolean,
         pestana: Int, onPestana: (Int) -> Unit,
         filtro: String, onFiltro: (String) -> Unit,
-        origenMsg: String, mostrarAdultos: Boolean, onAdultos: (Boolean) -> Unit,
+        origenMsg: String,
         versionNombre: String, versionCodigo: Int,
         diagnosticoFirma: String, firmaOk: Boolean,
         update: UpdateInfo?, updateMsg: String?, progreso: Int,
@@ -1313,39 +1310,6 @@ class HomeActivity : ComponentActivity() {
                                 modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp))
                         }
                         Spacer(Modifier.width(5.dp))
-                    }
-                }
-
-                // Interruptor de contenido adulto, solo en la pestaña de categorias
-                if (pestana == 1) {
-                    Spacer(Modifier.height(6.dp))
-                    FocusableCard(
-                        onClick = { onAdultos(!mostrarAdultos) },
-                        modifier = Modifier.fillMaxWidth(),
-                        containerColor = if (mostrarAdultos) Color(0x33FF6B5E) else Color(0x1AFFFFFF),
-                        focusedContainerColor = Accent,
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                Modifier.size(13.dp).background(
-                                    if (mostrarAdultos) Color(0xFFFF6B5E) else Color(0x55FFFFFF),
-                                    RoundedCornerShape(3.dp)
-                                )
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Column {
-                                Text("Incluir categoria +18",
-                                    color = Color.White, fontSize = 11.sp)
-                                Text(
-                                    if (mostrarAdultos) "Activada" else "Desactivada por defecto",
-                                    color = TextMuted, fontSize = 9.sp
-                                )
-                            }
-                        }
                     }
                 }
 

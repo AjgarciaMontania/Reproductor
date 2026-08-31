@@ -28,8 +28,8 @@ object CatalogRepository {
     )
 
     /** Categorias: las de la API mas las fijas que la API no cubre. */
-    suspend fun categorias(incluirAdultos: Boolean): Resultado {
-        val api = runCatching { IptvOrgApi.categorias(incluirAdultos) }.getOrDefault(emptyList())
+    suspend fun categorias(): Resultado {
+        val api = runCatching { IptvOrgApi.categorias() }.getOrDefault(emptyList())
         return unir(api, Catalogs.presets)
     }
 
