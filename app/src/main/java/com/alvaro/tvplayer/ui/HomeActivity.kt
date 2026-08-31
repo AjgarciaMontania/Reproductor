@@ -253,6 +253,8 @@ class HomeActivity : ComponentActivity() {
         var cargandoApi by remember { mutableStateOf(false) }
         var pestanaCat by remember { mutableIntStateOf(0) }
         var filtroCat by remember { mutableStateOf("") }
+        var origenCat by remember { mutableStateOf("") }
+        var adultos by remember { mutableStateOf(prefs.mostrarAdultos()) }
 
         var coleccion by remember { mutableStateOf(ArchiveMovies.colecciones.first().id) }
         var peliculas by remember { mutableStateOf<List<Movie>>(emptyList()) }
@@ -426,12 +428,18 @@ class HomeActivity : ComponentActivity() {
                 playlist.channels.firstOrNull { !ChannelChecker.estaCaido(it) }?.let { verCanal(it) }
             }
         }
-        // Al entrar en LISTAS se traen los indices completos de la API.
-        LaunchedEffect(seccion) {
-            if (seccion == Seccion.LISTAS && catCategorias.isEmpty() && !cargandoApi) {
-                cargandoApi = true
-                catCategorias = IptvOrgApi.categorias()
-                catPaises = IptvOrgApi.paises()
+        // Al entrar en LISTAS se piden los indices. CatalogRepository une la API
+        // con las listas fijas, y si la API no responde sigue con las fijas.
+        LaunchedEffect(seccion, adultos) {
+            if (seccion != Seccion.LISTAS) return@LaunchedEffect
+            cargandoApi = true
+            try {
+                val c = CatalogRepository.categorias(adultos)
+                val p = CatalogRepository.paises()
+                catCategorias = c.catalogos
+                catPaises = p.catalogos
+                origenCat = c.mensaje
+            } finally {
                 cargandoApi = false
             }
         }
@@ -619,12 +627,19 @@ class HomeActivity : ComponentActivity() {
                                 Seccion.LISTAS -> PanelListas(
                                     totalCanales = playlist.channels.size,
                                     categorias = playlist.groups.size,
-                                    catalogosApi = if (pestanaCat == 0) catCategorias else catPaises,
-                                    cargandoApi = cargandoApi,
+                                    catalogosApi = when (pestanaCat) {
+                                        0 -> CatalogRepository.fijas()
+                                        1 -> catCategorias
+                                        else -> catPaises
+                                    },
+                                    cargandoApi = cargandoApi && pestanaCat != 0,
                                     pestana = pestanaCat,
                                     onPestana = { pestanaCat = it },
                                     filtro = filtroCat,
                                     onFiltro = { filtroCat = it },
+                                    origenMsg = origenCat,
+                                    mostrarAdultos = adultos,
+                                    onAdultos = { adultos = it; prefs.setMostrarAdultos(it) },
                                     versionNombre = versionNombre,
                                     versionCodigo = versionCodigo,
                                     diagnosticoFirma = AppSignature.diagnostico(actividad),
@@ -1144,6 +1159,7 @@ class HomeActivity : ComponentActivity() {
         catalogosApi: List<Catalog>, cargandoApi: Boolean,
         pestana: Int, onPestana: (Int) -> Unit,
         filtro: String, onFiltro: (String) -> Unit,
+        origenMsg: String, mostrarAdultos: Boolean, onAdultos: (Boolean) -> Unit,
         versionNombre: String, versionCodigo: Int,
         diagnosticoFirma: String, firmaOk: Boolean,
         update: UpdateInfo?, updateMsg: String?, progreso: Int,
@@ -1170,11 +1186,17 @@ class HomeActivity : ComponentActivity() {
                 Spacer(Modifier.height(8.dp))
                 Text("Explorar catalogos", color = Color.White, fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold)
-                Text("Listas publicadas por iptv-org, al dia", color = TextMuted, fontSize = 9.5.sp)
+                Text(
+                    when (pestana) {
+                        0 -> "Incluidas en la app: funcionan sin depender de nadie"
+                        else -> origenMsg.ifBlank { "Indices de iptv-org" }
+                    },
+                    color = if (pestana == 0) TextMuted else Accent, fontSize = 9.5.sp
+                )
                 Spacer(Modifier.height(6.dp))
 
                 Row {
-                    listOf("Categorias", "Paises").forEachIndexed { i, etiqueta ->
+                    listOf("Fijas", "Categorias", "Paises").forEachIndexed { i, etiqueta ->
                         FocusableCard(
                             onClick = { onPestana(i) },
                             containerColor = if (pestana == i) Accent else Color(0x33FFFFFF),
@@ -1182,11 +1204,45 @@ class HomeActivity : ComponentActivity() {
                             shape = RoundedCornerShape(20.dp)
                         ) {
                             Text(etiqueta, color = Color.White, fontSize = 11.sp,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp))
+                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp))
                         }
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(5.dp))
                     }
                 }
+
+                // Interruptor de contenido adulto, solo en la pestaña de categorias
+                if (pestana == 1) {
+                    Spacer(Modifier.height(6.dp))
+                    FocusableCard(
+                        onClick = { onAdultos(!mostrarAdultos) },
+                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = if (mostrarAdultos) Color(0x33FF6B5E) else Color(0x1AFFFFFF),
+                        focusedContainerColor = Accent,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.size(13.dp).background(
+                                    if (mostrarAdultos) Color(0xFFFF6B5E) else Color(0x55FFFFFF),
+                                    RoundedCornerShape(3.dp)
+                                )
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text("Incluir categoria +18",
+                                    color = Color.White, fontSize = 11.sp)
+                                Text(
+                                    if (mostrarAdultos) "Activada" else "Desactivada por defecto",
+                                    color = TextMuted, fontSize = 9.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(6.dp))
                 CampoTexto(filtro, onFiltro, "Filtrar...")
                 Spacer(Modifier.height(6.dp))
